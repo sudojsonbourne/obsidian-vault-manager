@@ -1,0 +1,85 @@
+# =============================================================================
+# molecule/default/molecule.yml — Molecule Test Configuration
+# =============================================================================
+# PURPOSE:
+#   Defines the Molecule test scenario for the ZIA automation roles.
+#   Uses the 'delegated' driver since ZIA is a cloud API (no containers needed).
+#
+# MOLECULE OVERVIEW:
+#   Molecule provides a testing framework for Ansible roles.
+#   For ZIA automation, we test:
+#   1. Syntax validation (ansible-lint, yamllint)
+#   2. Variable validation logic (assert tasks)
+#   3. Idempotency (run twice, second run should show no changes)
+#   4. Check mode behavior
+#
+# RUNNING TESTS:
+#   # Run full test suite:
+#   cd roles/zscaler_zia_locations && molecule test
+#
+#   # Run only lint:
+#   molecule lint
+#
+#   # Run only syntax check:
+#   molecule syntax
+#
+#   # Run converge (apply role with test vars):
+#   molecule converge
+#
+#   # Run idempotency check:
+#   molecule idempotency
+#
+# CI/CD INTEGRATION:
+#   Add to .gitlab-ci.yml or .github/workflows:
+#     - pip install molecule molecule-plugins ansible-lint
+#     - cd roles/zscaler_zia_locations && molecule test
+# =============================================================================
+
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../requirements.yml
+
+driver:
+  # Use 'delegated' driver for cloud API testing
+  # No containers or VMs needed — tests run against mock/staging ZIA
+  name: delegated
+
+platforms:
+  # Define a virtual "host" that represents the ZIA tenant
+  # In delegated mode, this is just a logical target
+  - name: zia-test-tenant
+    groups:
+      - zia_tenants
+
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      # Use the project's ansible.cfg settings
+      roles_path: ../../roles
+      collections_paths: ../../collections
+  inventory:
+    hosts:
+      zia-test-tenant:
+        # Test inventory variables
+        ansible_connection: local
+        zia_cloud: "zscaler"
+        env: "staging"
+        vault_zia_path: "secret/zia/test/credentials"
+        vault_addr: "http://127.0.0.1:8200"
+        vault_auth_method: "token"
+        vault_validate_certs: false
+  env:
+    # Use a test Vault token for molecule runs
+    VAULT_ADDR: "http://127.0.0.1:8200"
+    VAULT_TOKEN: "molecule-test-token"
+
+verifier:
+  name: ansible
+
+lint: |
+  set -e
+  yamllint .
+  ansible-lint

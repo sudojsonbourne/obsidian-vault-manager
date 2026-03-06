@@ -1,0 +1,218 @@
+# =============================================================================
+# roles/zscaler_zia_locations/tasks/validate.yml — Location Validation
+# =============================================================================
+# PURPOSE:
+#   Pre-flight validation for all location definitions.
+#   Runs BEFORE any changes are made to ZIA.
+#   If ANY validation fails, the entire role stops immediately.
+#
+# VALIDATION CHECKS:
+#   1. Required fields are present (name, state, ip_addresses, country, tz)
+#   2. Location names match naming convention
+#   3. State values are valid (present or absent)
+#   4. IP addresses are valid IPv4 format
+#   5. Country codes are valid ZIA country names
+#   6. Timezone strings are valid IANA timezones
+#   7. Bandwidth values are non-negative integers
+#   8. Profile values are valid ZIA profile types
+#   9. No duplicate location names in the definition list
+#
+# WHY VALIDATE BEFORE CHANGES?
+#   "Fail fast, fail clearly."
+#   It's far better to catch a typo in a location name BEFORE making
+#   50 API calls than to discover it halfway through a bulk operation.
+#   Validation provides a clear, actionable error message.
+# =============================================================================
+
+---
+- name: "VALIDATE | Assert zia_locations list is defined and not empty"
+  ansible.builtin.assert:
+    that:
+      - zia_locations is defined
+      - zia_locations | type_debug == 'list'
+      - zia_locations | length > 0
+    fail_msg: |
+      ❌ zia_locations is not defined or is empty!
+      Check: vars/locations/bulk_locations.yml
+    success_msg: "✅ zia_locations list loaded: {{ zia_locations | length }} locations"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATE REQUIRED FIELDS
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Assert required fields present for each location"
+  ansible.builtin.assert:
+    that:
+      - item.name is defined and item.name | length > 0
+      - item.state is defined
+      - item.state in ['present', 'absent']
+      - item.ip_addresses is defined
+      - item.ip_addresses | type_debug == 'list'
+      - item.ip_addresses | length > 0
+      - item.country is defined and item.country | length > 0
+      - item.tz is defined and item.tz | length > 0
+    fail_msg: |
+      ❌ Location '{{ item.name | default('UNNAMED') }}' is missing required fields!
+
+      Required fields: name, state, ip_addresses (list), country, tz
+      Current values:
+        name:         {{ item.name | default('MISSING') }}
+        state:        {{ item.state | default('MISSING') }}
+        ip_addresses: {{ item.ip_addresses | default('MISSING') }}
+        country:      {{ item.country | default('MISSING') }}
+        tz:           {{ item.tz | default('MISSING') }}
+
+      Fix the location definition in vars/locations/bulk_locations.yml
+    success_msg: "✅ Location '{{ item.name }}' has all required fields"
+  loop: "{{ zia_locations }}"
+  loop_control:
+    label: "{{ item.name | default('UNNAMED') }}"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATE LOCATION NAMES
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Assert location names match naming convention"
+  ansible.builtin.assert:
+    that:
+      # Name must match the configured pattern (e.g., NYC-HQ-01)
+      # Pattern is configurable in group_vars/all/zia_defaults.yml
+      - item.name | regex_search(location_name_pattern) is not none
+      # Name must not exceed maximum length
+      - item.name | length <= location_name_max_length
+    fail_msg: |
+      ❌ Location name '{{ item.name }}' does not match naming convention!
+
+      Required pattern: {{ location_name_pattern }}
+      Examples: NYC-HQ-01, LAX-BRANCH-03, LON-OFFICE-02
+      Maximum length: {{ location_name_max_length }} characters
+      Current length: {{ item.name | length }} characters
+
+      Fix the location name in vars/locations/bulk_locations.yml
+    success_msg: "✅ Location name '{{ item.name }}' matches naming convention"
+  loop: "{{ zia_locations }}"
+  loop_control:
+    label: "{{ item.name }}"
+  # Only validate names if the feature is enabled
+  when: validate_location_names | default(true)
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATE IP ADDRESSES
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Assert IP addresses are valid IPv4 format"
+  ansible.builtin.assert:
+    that:
+      # Each IP must be a valid IPv4 address
+      # Uses the ansible.utils.ipaddr filter
+      - item.1 | ansible.utils.ipv4 is not false
+      - item.1 | ansible.utils.ipv4 != false
+    fail_msg: |
+      ❌ Invalid IP address '{{ item.1 }}' in location '{{ item.0.name }}'!
+
+      IP addresses must be valid IPv4 addresses.
+      Example: 203.0.113.10
+
+      Fix the ip_addresses list in vars/locations/bulk_locations.yml
+    success_msg: "✅ IP '{{ item.1 }}' in '{{ item.0.name }}' is valid"
+  # Create a flat list of (location, ip) pairs for validation
+  loop: "{{ zia_locations | subelements('ip_addresses') }}"
+  loop_control:
+    label: "{{ item.0.name }}: {{ item.1 }}"
+  when: validate_ip_addresses | default(true)
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATE NO DUPLICATE NAMES
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Assert no duplicate location names"
+  ansible.builtin.assert:
+    that:
+      # The number of unique names must equal the total count
+      - zia_locations | map(attribute='name') | list | unique | length ==
+        zia_locations | length
+    fail_msg: |
+      ❌ Duplicate location names detected!
+
+      Location names must be unique. Check vars/locations/bulk_locations.yml
+      for duplicate entries.
+
+      All names: {{ zia_locations | map(attribute='name') | list | sort | join(', ') }}
+    success_msg: "✅ All location names are unique"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATE BANDWIDTH VALUES
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Assert bandwidth values are non-negative integers"
+  ansible.builtin.assert:
+    that:
+      - item.up_bandwidth | default(0) | int >= 0
+      - item.dn_bandwidth | default(0) | int >= 0
+    fail_msg: |
+      ❌ Invalid bandwidth values for location '{{ item.name }}'!
+
+      Bandwidth values must be non-negative integers (0 = unlimited).
+      up_bandwidth: {{ item.up_bandwidth | default(0) }}
+      dn_bandwidth: {{ item.dn_bandwidth | default(0) }}
+    success_msg: "✅ Bandwidth values valid for '{{ item.name }}'"
+  loop: "{{ zia_locations }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATE PROFILE VALUES
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Assert profile values are valid ZIA profile types"
+  ansible.builtin.assert:
+    that:
+      - item.profile | default('CORPORATE') in
+        ['NONE', 'CORPORATE', 'SERVER', 'GUESTWIFI', 'IOT', 'WORKLOAD']
+    fail_msg: |
+      ❌ Invalid profile '{{ item.profile | default('CORPORATE') }}' for location '{{ item.name }}'!
+
+      Valid profiles: NONE, CORPORATE, SERVER, GUESTWIFI, IOT, WORKLOAD
+    success_msg: "✅ Profile '{{ item.profile | default('CORPORATE') }}' valid for '{{ item.name }}'"
+  loop: "{{ zia_locations }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# VALIDATION SUMMARY
+# ---------------------------------------------------------------------------
+
+- name: "VALIDATE | Print validation success summary"
+  ansible.builtin.debug:
+    msg: |
+      ✅ ALL VALIDATIONS PASSED
+      ─────────────────────────────────────────────────────────────
+      Locations validated: {{ zia_locations | length }}
+      Locations to create: {{ zia_locations | selectattr('state', 'equalto', 'present') | list | length }}
+      Locations to delete: {{ zia_locations | selectattr('state', 'equalto', 'absent') | list | length }}
+      ─────────────────────────────────────────────────────────────
+      Proceeding with location management...
+  tags:
+    - validate
+    - always

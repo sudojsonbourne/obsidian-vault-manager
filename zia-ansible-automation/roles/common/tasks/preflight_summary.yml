@@ -1,0 +1,211 @@
+# =============================================================================
+# roles/common/tasks/preflight_summary.yml — Pre-Flight Summary Output
+# =============================================================================
+# PURPOSE:
+#   Prints a comprehensive pre-flight summary before any changes are made.
+#   This gives operators a clear picture of what WILL happen before it happens.
+#
+# DEFENSIVE AUTOMATION PHILOSOPHY:
+#   "Never surprise the operator."
+#   Before making ANY changes to production infrastructure, the automation
+#   must clearly communicate:
+#   1. WHAT will be changed (resource names, types, counts)
+#   2. WHERE changes will be applied (tenant, environment)
+#   3. WHO is running the automation (operator identity)
+#   4. WHEN the automation is running (timestamp)
+#   5. HOW the automation is configured (dry-run vs. live, force flags)
+#
+#   This pre-flight summary serves as the "last chance" for an operator
+#   to abort before changes are applied. Combined with --check mode,
+#   it provides a complete picture of planned changes.
+#
+# WHEN TO INCLUDE THIS:
+#   Include at the start of any playbook that makes changes:
+#   - onboard_locations.yml
+#   - teardown_locations.yml
+#   - block_malicious_domains.yml
+#   - site.yml
+#
+# USAGE:
+#   - name: Run pre-flight summary
+#     ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/preflight_summary.yml"
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# COLLECT PRE-FLIGHT INFORMATION
+# ---------------------------------------------------------------------------
+
+- name: "PREFLIGHT | Collect current timestamp"
+  ansible.builtin.set_fact:
+    # Record the exact time the playbook started
+    # Used in logs, notifications, and audit records
+    playbook_start_time: "{{ ansible_date_time.iso8601 }}"
+    playbook_start_epoch: "{{ ansible_date_time.epoch }}"
+  tags:
+    - always
+    - preflight
+
+- name: "PREFLIGHT | Collect operator identity"
+  ansible.builtin.set_fact:
+    # Identify who is running this playbook
+    # Priority: ANSIBLE_OPERATOR env var > git user > system user
+    current_operator: "{{ lookup('env', 'ANSIBLE_OPERATOR') | default(lookup('env', 'USER'), true) }}"
+    current_git_commit: "{{ lookup('env', 'ANSIBLE_GIT_COMMIT') | default('manual-run', true) }}"
+    current_pipeline_id: "{{ lookup('env', 'ANSIBLE_PIPELINE_ID') | default('N/A', true) }}"
+  tags:
+    - always
+    - preflight
+
+# ---------------------------------------------------------------------------
+# PRINT PRE-FLIGHT SUMMARY
+# ---------------------------------------------------------------------------
+
+- name: "PREFLIGHT | Print pre-flight summary banner"
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════════════╗
+      ║              ZIA ANSIBLE AUTOMATION — PRE-FLIGHT SUMMARY            ║
+      ╚══════════════════════════════════════════════════════════════════════╝
+
+      📋 EXECUTION CONTEXT
+      ─────────────────────────────────────────────────────────────────────
+      Timestamp:      {{ playbook_start_time }}
+      Operator:       {{ current_operator }}
+      Git Commit:     {{ current_git_commit }}
+      Pipeline ID:    {{ current_pipeline_id }}
+      Playbook:       {{ ansible_play_name | default('Unknown') }}
+
+      🏢 TARGET ENVIRONMENT
+      ─────────────────────────────────────────────────────────────────────
+      Environment:    {{ environment_name | default(env) | upper }}
+      ZIA Tenant:     {{ inventory_hostname }}
+      ZIA Cloud:      {{ zia_cloud }}
+      Vault Path:     {{ vault_zia_path }}
+
+      ⚙️  OPERATION SETTINGS
+      ─────────────────────────────────────────────────────────────────────
+      Check Mode:     {{ ansible_check_mode | ternary('YES (no changes will be made)', 'NO (changes WILL be applied)') }}
+      Force Delete:   {{ force | default(false) | ternary('YES ⚠️', 'NO') }}
+      Auto Activate:  {{ zia_auto_activate | default(true) | ternary('YES', 'NO') }}
+      Soft Delete:    {{ soft_delete_enabled | default(true) | ternary('YES', 'NO') }}
+
+      🛡️  SAFETY CONTROLS
+      ─────────────────────────────────────────────────────────────────────
+      Require Confirm: {{ require_confirmation | default(true) | ternary('YES', 'NO') }}
+      Max Bulk Delete: {{ max_bulk_delete | default(5) }}
+      Grace Hours:     {{ soft_delete_grace_hours | default(24) }}h
+
+      ══════════════════════════════════════════════════════════════════════
+  tags:
+    - always
+    - preflight
+
+- name: "PREFLIGHT | Print location summary (if locations defined)"
+  ansible.builtin.debug:
+    msg: |
+      📍 LOCATION SUMMARY
+      ─────────────────────────────────────────────────────────────────────
+      Total locations defined:  {{ zia_locations | default([]) | length }}
+      Locations to CREATE:      {{ zia_locations | default([]) | selectattr('state', 'equalto', 'present') | list | length }}
+      Locations to DELETE:      {{ zia_locations | default([]) | selectattr('state', 'equalto', 'absent') | list | length }}
+
+      Location names (present):
+      {% for loc in zia_locations | default([]) | selectattr('state', 'equalto', 'present') | list %}
+        ✅ {{ loc.name }} ({{ loc.country | default('N/A') }})
+      {% endfor %}
+      {% if zia_locations | default([]) | selectattr('state', 'equalto', 'absent') | list | length > 0 %}
+
+      Location names (to DELETE):
+      {% for loc in zia_locations | default([]) | selectattr('state', 'equalto', 'absent') | list %}
+        ❌ {{ loc.name }} ← WILL BE DELETED
+      {% endfor %}
+      {% endif %}
+  when: zia_locations is defined and zia_locations | length > 0
+  tags:
+    - always
+    - preflight
+
+- name: "PREFLIGHT | Print GRE tunnel summary (if tunnels defined)"
+  ansible.builtin.debug:
+    msg: |
+      🔗 GRE TUNNEL SUMMARY
+      ─────────────────────────────────────────────────────────────────────
+      Total tunnels defined:  {{ zia_gre_tunnels | default([]) | length }}
+      Tunnels to CREATE:      {{ zia_gre_tunnels | default([]) | selectattr('state', 'equalto', 'present') | list | length }}
+      Tunnels to DELETE:      {{ zia_gre_tunnels | default([]) | selectattr('state', 'equalto', 'absent') | list | length }}
+  when: zia_gre_tunnels is defined and zia_gre_tunnels | length > 0
+  tags:
+    - always
+    - preflight
+
+- name: "PREFLIGHT | Print check mode warning"
+  ansible.builtin.debug:
+    msg: |
+      ⚠️  CHECK MODE IS ACTIVE
+      ════════════════════════════════════════════════════════════════════
+      No changes will be made to ZIA. This is a DRY RUN.
+      Review the output above and below to see what WOULD change.
+
+      To apply changes, run WITHOUT --check flag:
+        ansible-playbook -i {{ inventory_dir }} {{ ansible_play_name }}.yml
+
+      Or use the Makefile:
+        make apply
+      ════════════════════════════════════════════════════════════════════
+  when: ansible_check_mode
+  tags:
+    - always
+    - preflight
+
+- name: "PREFLIGHT | Print deletion warning (if any locations marked absent)"
+  ansible.builtin.debug:
+    msg: |
+      ⚠️  ⚠️  ⚠️  DELETION WARNING ⚠️  ⚠️  ⚠️
+      ════════════════════════════════════════════════════════════════════
+      {{ zia_locations | default([]) | selectattr('state', 'equalto', 'absent') | list | length }}
+      location(s) are marked for DELETION.
+
+      This action is IRREVERSIBLE (unless soft-delete grace period applies).
+
+      Locations to be deleted:
+      {% for loc in zia_locations | default([]) | selectattr('state', 'equalto', 'absent') | list %}
+        ❌ {{ loc.name }}
+      {% endfor %}
+
+      To proceed with deletion, you must pass: --extra-vars "force=true"
+      Current force flag: {{ force | default(false) }}
+      ════════════════════════════════════════════════════════════════════
+  when:
+    - zia_locations is defined
+    - zia_locations | selectattr('state', 'equalto', 'absent') | list | length > 0
+  tags:
+    - always
+    - preflight
+
+# ---------------------------------------------------------------------------
+# CHANGE MANAGEMENT VALIDATION
+# ---------------------------------------------------------------------------
+
+- name: "PREFLIGHT | Validate change ticket (if change management enabled)"
+  ansible.builtin.assert:
+    that:
+      # If change management is enabled, a valid ticket number must be provided
+      - change_ticket is defined
+      - change_ticket | regex_search(change_ticket_pattern) is not none
+    fail_msg: |
+      ❌ Change management is enabled but no valid change ticket was provided!
+
+      A valid change ticket is required for production changes.
+      Pattern: {{ change_ticket_pattern }}
+      Example: CHG0001234
+
+      Run with: --extra-vars "change_ticket=CHG0001234"
+    success_msg: "✅ Change ticket validated: {{ change_ticket }}"
+  when:
+    - change_management_enabled | default(false)
+    - not ansible_check_mode
+  tags:
+    - always
+    - preflight
+    - change-management

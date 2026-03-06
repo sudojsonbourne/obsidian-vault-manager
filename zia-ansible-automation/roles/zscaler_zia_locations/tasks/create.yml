@@ -1,0 +1,171 @@
+# =============================================================================
+# roles/zscaler_zia_locations/tasks/create.yml — Location Create/Update
+# =============================================================================
+# PURPOSE:
+#   Creates or updates a single ZIA location.
+#   Called in a loop from main.yml for each location with state=present.
+#   The loop variable is 'location_item' (set in main.yml loop_var).
+#
+# IDEMPOTENCY:
+#   The zscaler.ziacloud.zia_location_management module is idempotent:
+#   - If location doesn't exist: CREATES it
+#   - If location exists with same config: NO CHANGE (returns ok)
+#   - If location exists with different config: UPDATES it
+#   This means this task is safe to run multiple times.
+#
+# --diff SUPPORT:
+#   When run with --diff, Ansible shows what would change.
+#   The ZIA module supports diff mode natively.
+#
+# --check SUPPORT:
+#   When run with --check, no API calls are made.
+#   The module reports what WOULD happen without making changes.
+# =============================================================================
+
+---
+- name: "CREATE | Log location being processed"
+  ansible.builtin.debug:
+    msg: |
+      🏢 Processing location: {{ location_item.name }}
+         State:    {{ location_item.state }}
+         Country:  {{ location_item.country }}
+         Timezone: {{ location_item.tz }}
+         IPs:      {{ location_item.ip_addresses | join(', ') }}
+         Profile:  {{ location_item.profile | default('CORPORATE') }}
+  tags:
+    - create
+    - update
+
+# ---------------------------------------------------------------------------
+# CREATE OR UPDATE THE LOCATION
+# ---------------------------------------------------------------------------
+# The zia_location_management module handles both create and update.
+# It determines the correct action based on whether the location exists.
+#
+# CREDENTIAL USAGE:
+#   Credentials (zia_username, zia_password, zia_api_key) were retrieved
+#   from HashiCorp Vault in the common role's vault_auth.yml task.
+#   They are passed here as module parameters.
+#   no_log: true prevents them from appearing in output.
+
+- name: "CREATE | Create or update ZIA location: {{ location_item.name }}"
+  zscaler.ziacloud.zia_location_management:
+    # -------------------------------------------------------------------------
+    # AUTHENTICATION (from Vault — never hardcoded)
+    # -------------------------------------------------------------------------
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+
+    # -------------------------------------------------------------------------
+    # LOCATION IDENTITY
+    # -------------------------------------------------------------------------
+    # The name is the unique identifier for the location in ZIA
+    name: "{{ location_item.name }}"
+
+    # State: present = create or update
+    state: "{{ location_item.state }}"
+
+    # -------------------------------------------------------------------------
+    # LOCATION GEOGRAPHY
+    # -------------------------------------------------------------------------
+    # Country must match ZIA's country name format (not ISO code)
+    # Example: "UNITED_STATES" not "US"
+    country: "{{ location_item.country }}"
+
+    # IANA timezone string
+    # Example: "US/Eastern", "Europe/London", "Asia/Singapore"
+    tz: "{{ location_item.tz }}"
+
+    # -------------------------------------------------------------------------
+    # NETWORK CONFIGURATION
+    # -------------------------------------------------------------------------
+    # Public egress IP addresses for this location
+    # ZIA uses these to identify traffic from this location
+    ip_addresses: "{{ location_item.ip_addresses }}"
+
+    # -------------------------------------------------------------------------
+    # LOCATION PROFILE & AUTHENTICATION
+    # -------------------------------------------------------------------------
+    # Profile determines default policy behavior
+    profile: "{{ location_item.profile | default(location_attr_defaults.profile) }}"
+
+    # Require user authentication at this location
+    auth_required: "{{ location_item.auth_required | default(location_attr_defaults.auth_required) }}"
+
+    # -------------------------------------------------------------------------
+    # SSL INSPECTION
+    # -------------------------------------------------------------------------
+    # Enable SSL inspection (requires certificate deployment to endpoints)
+    ssl_scan_enabled: "{{ location_item.ssl_scan_enabled | default(location_attr_defaults.ssl_scan_enabled) }}"
+
+    # Enable SSL inspection for Zscaler App users
+    zapp_ssl_scan_enabled: "{{ location_item.zapp_ssl_scan_enabled | default(location_attr_defaults.zapp_ssl_scan_enabled) }}"
+
+    # -------------------------------------------------------------------------
+    # SURROGATE IP
+    # -------------------------------------------------------------------------
+    # Map IP addresses to user identities (required for IP-based auth)
+    surrogate_ip: "{{ location_item.surrogate_ip | default(location_attr_defaults.surrogate_ip) }}"
+
+    # Enforce surrogate IP for known browsers
+    surrogate_ip_enforced_for_known_browsers: >-
+      {{ location_item.surrogate_ip_enforced_for_known_browsers |
+         default(location_attr_defaults.surrogate_ip_enforced_for_known_browsers) }}
+
+    # Idle time before surrogate IP mapping expires (minutes, 0=never)
+    idle_time_in_minutes: "{{ location_item.idle_time_in_minutes | default(location_attr_defaults.idle_time_in_minutes) }}"
+
+    # -------------------------------------------------------------------------
+    # XFF FORWARDING
+    # -------------------------------------------------------------------------
+    # Forward X-Forwarded-For header (for proxy chaining)
+    xff_forward_enabled: "{{ location_item.xff_forward_enabled | default(location_attr_defaults.xff_forward_enabled) }}"
+
+    # -------------------------------------------------------------------------
+    # BANDWIDTH CONTROL
+    # -------------------------------------------------------------------------
+    # Upload bandwidth limit in Mbps (0 = unlimited)
+    up_bandwidth: "{{ location_item.up_bandwidth | default(location_attr_defaults.up_bandwidth) }}"
+
+    # Download bandwidth limit in Mbps (0 = unlimited)
+    dn_bandwidth: "{{ location_item.dn_bandwidth | default(location_attr_defaults.dn_bandwidth) }}"
+
+    # Display time unit for bandwidth policies
+    display_time_unit: "{{ location_item.display_time_unit | default(location_attr_defaults.display_time_unit) }}"
+
+    # -------------------------------------------------------------------------
+    # DESCRIPTION
+    # -------------------------------------------------------------------------
+    description: "{{ location_item.description | default('Managed by Ansible - ' + location_item.name) }}"
+
+  # Register the result for post-task reporting
+  register: location_result
+
+  # Retry on transient API failures
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+
+  # CRITICAL: Prevent credentials from appearing in logs
+  no_log: true
+
+  tags:
+    - create
+    - update
+
+# ---------------------------------------------------------------------------
+# REPORT RESULT
+# ---------------------------------------------------------------------------
+
+- name: "CREATE | Report location result: {{ location_item.name }}"
+  ansible.builtin.debug:
+    msg: |
+      {% if location_result.changed %}
+      ✅ CHANGED: Location '{{ location_item.name }}' was created/updated
+      {% else %}
+      ℹ️  NO CHANGE: Location '{{ location_item.name }}' already matches desired state
+      {% endif %}
+  tags:
+    - create
+    - update

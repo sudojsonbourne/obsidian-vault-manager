@@ -1,0 +1,122 @@
+# =============================================================================
+# inventories/production/group_vars/all.yml — Production Group Variables
+# =============================================================================
+# PURPOSE:
+#   Variables that apply to ALL hosts in the production inventory.
+#   This is the primary configuration file for production-specific settings.
+#
+# WHAT BELONGS HERE:
+#   - Environment identifier (env: production)
+#   - Production-specific API rate limits
+#   - Production notification endpoints
+#   - Production-specific safety thresholds
+#
+# WHAT DOES NOT BELONG HERE:
+#   - Credentials (use HashiCorp Vault)
+#   - Secrets of any kind
+#   - Sensitive data
+#
+# VARIABLE PRECEDENCE:
+#   This file is loaded for all hosts in the production inventory.
+#   Variables here can be overridden by:
+#   - Host-specific vars (inventories/production/hosts.yml host vars)
+#   - Extra vars (--extra-vars on command line)
+#   - Role vars (roles/*/vars/main.yml)
+#
+# RELATIONSHIP TO group_vars/all/:
+#   The project-level group_vars/all/ directory contains variables that
+#   apply across ALL inventories (production AND staging).
+#   This file contains PRODUCTION-SPECIFIC overrides.
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# ENVIRONMENT IDENTIFIER
+# ---------------------------------------------------------------------------
+# Used throughout playbooks to:
+# - Select the correct Vault paths
+# - Enable/disable safety guardrails
+# - Control notification behavior
+# - Tag resources with environment labels
+env: "production"
+environment_name: "Production"
+
+# ---------------------------------------------------------------------------
+# SAFETY CONTROLS — PRODUCTION SPECIFIC
+# ---------------------------------------------------------------------------
+# In production, safety controls are MAXIMALLY restrictive.
+# These can be overridden with --extra-vars but require explicit intent.
+
+# Require explicit confirmation before any destructive operation
+# Set to false only in CI/CD pipelines with proper approval gates
+require_confirmation: true
+
+# Maximum number of locations that can be deleted in a single run
+# Prevents accidental mass deletion. Override with --extra-vars if needed.
+max_bulk_delete: 5
+
+# Enable dry-run mode by default in production
+# Operators must explicitly pass --extra-vars "dry_run=false" to apply changes
+# NOTE: This is separate from --check mode. dry_run=true adds extra validation.
+dry_run: false
+
+# Soft-delete strategy: disable locations before deleting them
+# This gives a recovery window before permanent deletion
+soft_delete_enabled: true
+
+# Hours to wait between soft-disable and hard-delete (0 = immediate)
+# In production, set to 24 hours minimum for recovery window
+soft_delete_grace_hours: 24
+
+# ---------------------------------------------------------------------------
+# ZIA API SETTINGS — PRODUCTION
+# ---------------------------------------------------------------------------
+# Production API rate limiting
+# ZIA enforces rate limits; these settings prevent hitting them
+zia_api_rate_limit_delay: 1        # Seconds between API calls
+zia_api_max_retries: 3             # Max retries on transient failures
+zia_api_retry_delay: 5             # Seconds between retries
+zia_api_timeout: 30                # API call timeout in seconds
+
+# ---------------------------------------------------------------------------
+# NOTIFICATION SETTINGS — PRODUCTION
+# ---------------------------------------------------------------------------
+# Slack webhook for change notifications (URL stored in Vault)
+# vault path: secret/notifications/slack_webhook
+slack_notifications_enabled: true
+slack_channel: "#zia-automation-prod"
+slack_username: "ZIA Ansible Bot"
+
+# Email notifications for critical failures
+email_notifications_enabled: true
+email_on_failure: "network-ops@corp.example.com"
+email_on_success: "network-ops@corp.example.com"
+
+# ---------------------------------------------------------------------------
+# LOGGING — PRODUCTION
+# ---------------------------------------------------------------------------
+# Structured logging configuration for production
+log_level: "INFO"
+log_format: "json"                 # json | text (json for SIEM ingestion)
+log_include_timestamps: true
+log_include_host: true
+log_include_task: true
+
+# ---------------------------------------------------------------------------
+# CHANGE MANAGEMENT
+# ---------------------------------------------------------------------------
+# Change ticket validation (integrate with ServiceNow, Jira, etc.)
+# When enabled, a valid change ticket number must be provided
+change_management_enabled: false   # Set to true when integrated with ITSM
+change_ticket_pattern: "^CHG[0-9]{7}$"  # ServiceNow change ticket format
+
+# ---------------------------------------------------------------------------
+# VAULT PATHS — PRODUCTION
+# ---------------------------------------------------------------------------
+# Base path in HashiCorp Vault for production secrets
+# Full path: {{ vault_base_path }}/{{ vault_zia_path }}
+vault_base_path: "secret"
+vault_engine: "kv2"               # KV version 2 (supports versioning)
+
+# Notification secrets path
+vault_notifications_path: "secret/notifications"

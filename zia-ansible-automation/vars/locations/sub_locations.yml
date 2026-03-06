@@ -1,0 +1,275 @@
+# =============================================================================
+# vars/locations/sub_locations.yml — Sub-Location Definitions
+# =============================================================================
+# PURPOSE:
+#   Defines all ZIA sub-locations and their parent location relationships.
+#   Sub-locations allow granular policy control within a parent location.
+#
+# DEPENDENCY HANDLING STRATEGY:
+#   Sub-locations REQUIRE a parent location to exist before creation.
+#   The sub-location management role enforces this dependency:
+#
+#   1. PARENT EXISTENCE CHECK (validate.yml):
+#      Before creating any sub-location, the role queries ZIA API to
+#      confirm the parent location exists. If the parent is missing,
+#      the task FAILS with a descriptive error message.
+#
+#   2. DYNAMIC PARENT ID RESOLUTION:
+#      The parent location name is used to look up the parent's ZIA ID.
+#      This ID is then passed to the sub-location creation API call.
+#      This avoids hardcoding IDs (which change between environments).
+#
+#   3. ORDERING:
+#      The sub-location role is always called AFTER the location role
+#      in site.yml and onboard_locations.yml. This ensures parents
+#      exist before sub-location creation is attempted.
+#
+#   4. GRE TUNNEL VALIDATION:
+#      Sub-locations that use GRE tunnels validate that the required
+#      GRE tunnel exists and is active before creation.
+#
+# COMMON USE CASES FOR SUB-LOCATIONS:
+#   - Floor-level segmentation within a building
+#   - Guest WiFi vs. corporate network separation
+#   - IoT device network isolation
+#   - Server subnet separation from user subnets
+#   - VPN user subnet vs. local user subnet
+#
+# FIELD REFERENCE:
+#   name          (required) — Sub-location name (must include parent prefix)
+#   parent_name   (required) — Parent location name (must exist in ZIA)
+#   state         (required) — 'present' or 'absent'
+#   ip_addresses  (required) — IP ranges for this sub-location (CIDR)
+#   description   (optional) — Human-readable description
+#   auth_required (optional) — Override parent auth setting
+#   ssl_scan_enabled (optional) — Override parent SSL setting
+#   up_bandwidth  (optional) — Bandwidth limit (overrides parent)
+#   dn_bandwidth  (optional) — Bandwidth limit (overrides parent)
+#   surrogate_ip  (optional) — Override parent surrogate IP setting
+# =============================================================================
+
+---
+zia_sub_locations:
+
+  # ===========================================================================
+  # NYC-HQ-01 SUB-LOCATIONS
+  # ===========================================================================
+  # The NYC headquarters has multiple sub-locations for different network
+  # segments within the building. Each sub-location has its own IP range
+  # and can have different policy settings.
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — Executive Floor (Floor 50)
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-EXEC"
+    parent_name: "NYC-HQ-01"       # Must match exactly the parent location name
+    state: present
+    description: "NYC HQ Executive Floor - Floor 50 - High Priority"
+    # IP range for executive floor (internal subnet)
+    # These are the source IPs that ZIA will see from this sub-location
+    ip_addresses:
+      - "10.1.50.0/24"             # Executive floor subnet
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    # Unlimited bandwidth for executives
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    profile: "CORPORATE"
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — General Office (Floors 1-49)
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-OFFICE"
+    parent_name: "NYC-HQ-01"
+    state: present
+    description: "NYC HQ General Office Floors 1-49"
+    ip_addresses:
+      - "10.1.1.0/22"              # General office subnets (10.1.1.0 - 10.1.4.255)
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    profile: "CORPORATE"
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — Guest WiFi
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-GUEST"
+    parent_name: "NYC-HQ-01"
+    state: present
+    description: "NYC HQ Guest WiFi Network - Untrusted"
+    ip_addresses:
+      - "10.1.100.0/24"            # Guest WiFi subnet (isolated)
+    # Guest WiFi: no auth required (captive portal handles it)
+    auth_required: false
+    ssl_scan_enabled: false        # No SSL inspection for guests
+    surrogate_ip: false            # No surrogate IP for guests
+    xff_forward_enabled: false
+    # Bandwidth limits for guest network
+    up_bandwidth: 10               # 10 Mbps upload limit per guest
+    dn_bandwidth: 50               # 50 Mbps download limit per guest
+    profile: "GUESTWIFI"           # Guest WiFi profile
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — IoT Devices
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-IOT"
+    parent_name: "NYC-HQ-01"
+    state: present
+    description: "NYC HQ IoT Device Network - Building Systems"
+    ip_addresses:
+      - "10.1.200.0/24"            # IoT device subnet
+    auth_required: false           # IoT devices don't authenticate
+    ssl_scan_enabled: false
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 5                # Strict bandwidth limits for IoT
+    dn_bandwidth: 10
+    profile: "IOT"                 # IoT profile
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — Conference Rooms
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-CONF"
+    parent_name: "NYC-HQ-01"
+    state: present
+    description: "NYC HQ Conference Room Network"
+    ip_addresses:
+      - "10.1.150.0/24"            # Conference room subnet
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    profile: "CORPORATE"
+
+  # ===========================================================================
+  # LON-HQ-01 SUB-LOCATIONS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # London HQ — Corporate Network
+  # ---------------------------------------------------------------------------
+  - name: "LON-HQ-01-CORP"
+    parent_name: "LON-HQ-01"
+    state: present
+    description: "London HQ Corporate Network"
+    ip_addresses:
+      - "10.10.1.0/24"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    profile: "CORPORATE"
+
+  # ---------------------------------------------------------------------------
+  # London HQ — Guest WiFi
+  # ---------------------------------------------------------------------------
+  - name: "LON-HQ-01-GUEST"
+    parent_name: "LON-HQ-01"
+    state: present
+    description: "London HQ Guest WiFi - GDPR Compliant"
+    ip_addresses:
+      - "10.10.100.0/24"
+    auth_required: false
+    ssl_scan_enabled: false
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 10
+    dn_bandwidth: 50
+    profile: "GUESTWIFI"
+
+  # ===========================================================================
+  # LAX-HQ-01 SUB-LOCATIONS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # LA HQ — Engineering Network
+  # ---------------------------------------------------------------------------
+  - name: "LAX-HQ-01-ENG"
+    parent_name: "LAX-HQ-01"
+    state: present
+    description: "LA HQ Engineering Network - Development Systems"
+    ip_addresses:
+      - "10.20.1.0/24"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    profile: "CORPORATE"
+
+  # ---------------------------------------------------------------------------
+  # LA HQ — Guest WiFi
+  # ---------------------------------------------------------------------------
+  - name: "LAX-HQ-01-GUEST"
+    parent_name: "LAX-HQ-01"
+    state: present
+    description: "LA HQ Guest WiFi"
+    ip_addresses:
+      - "10.20.100.0/24"
+    auth_required: false
+    ssl_scan_enabled: false
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 10
+    dn_bandwidth: 50
+    profile: "GUESTWIFI"
+
+  # ===========================================================================
+  # SIN-HQ-01 SUB-LOCATIONS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Singapore HQ — Corporate Network
+  # ---------------------------------------------------------------------------
+  - name: "SIN-HQ-01-CORP"
+    parent_name: "SIN-HQ-01"
+    state: present
+    description: "Singapore HQ Corporate Network"
+    ip_addresses:
+      - "10.30.1.0/24"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    profile: "CORPORATE"
+
+  # ---------------------------------------------------------------------------
+  # Singapore HQ — Guest WiFi
+  # ---------------------------------------------------------------------------
+  - name: "SIN-HQ-01-GUEST"
+    parent_name: "SIN-HQ-01"
+    state: present
+    description: "Singapore HQ Guest WiFi"
+    ip_addresses:
+      - "10.30.100.0/24"
+    auth_required: false
+    ssl_scan_enabled: false
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 10
+    dn_bandwidth: 50
+    profile: "GUESTWIFI"
+
+  # ===========================================================================
+  # EXAMPLE: SUB-LOCATION PENDING DELETION
+  # ===========================================================================
+  # Sub-locations must be deleted BEFORE their parent location.
+  # The teardown playbook handles this ordering automatically.
+  #
+  # - name: "NYC-HQ-01-OLD-FLOOR"
+  #   parent_name: "NYC-HQ-01"
+  #   state: absent
+  #   ip_addresses:
+  #     - "10.1.99.0/24"

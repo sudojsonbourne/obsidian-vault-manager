@@ -1,0 +1,24 @@
+# =============================================================================
+# roles/zscaler_zia_gre_tunnels/tasks/delete.yml — GRE Tunnel Deletion
+# =============================================================================
+---
+- name: "GRE-DELETE | Delete GRE tunnel: {{ tunnel_item.source_ip }}"
+  zscaler.ziacloud.zia_traffic_forwarding_gre_tunnels:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    source_ip: "{{ tunnel_item.source_ip }}"
+    state: absent
+  register: gre_delete_result
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+  no_log: true
+  tags:
+    - delete
+
+- name: "GRE-DELETE | Report deletion: {{ tunnel_item.source_ip }}"
+  ansible.builtin.debug:
+    msg: "{{ '✅ DELETED' if gre_delete_result.changed | default(false) else 'ℹ️  NOT FOUND' }}: GRE tunnel {{ tunnel_item.source_ip }}"
+  tags:
+    - delete

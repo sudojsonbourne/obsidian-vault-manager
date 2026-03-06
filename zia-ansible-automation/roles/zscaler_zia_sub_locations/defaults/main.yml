@@ -1,0 +1,9 @@
+# =============================================================================
+# roles/zscaler_zia_sub_locations/defaults/main.yml
+# =============================================================================
+---
+force: false
+zia_auto_activate: true
+zia_api_max_retries: 3
+zia_api_retry_delay: 5
+zia_api_rate_limit_delay: 1

@@ -1,0 +1,12 @@
+# =============================================================================
+# roles/zscaler_zia_domain_blocking/meta/main.yml
+# =============================================================================
+---
+galaxy_info:
+  role_name: zscaler_zia_domain_blocking
+  author: "Network Automation Team"
+  description: "Manages ZIA malicious domain blocking via custom URL categories"
+  min_ansible_version: "2.14"
+
+dependencies:
+  - role: common

@@ -1,0 +1,221 @@
+# =============================================================================
+# group_vars/all/zia_defaults.yml — ZIA API Default Settings
+# =============================================================================
+# PURPOSE:
+#   Defines default values for all ZIA resource configurations.
+#   These defaults apply across ALL environments and ALL tenants.
+#   Environment-specific overrides live in inventories/*/group_vars/all.yml
+#
+# DESIGN PHILOSOPHY:
+#   "Convention over configuration" — sensible defaults reduce the amount
+#   of configuration required per location. Only deviations from defaults
+#   need to be specified in the location definitions.
+#
+# HOW DEFAULTS WORK:
+#   1. These defaults are set here (lowest priority)
+#   2. Role defaults (roles/*/defaults/main.yml) can override these
+#   3. Location-specific vars override role defaults
+#   4. Extra vars (--extra-vars) override everything
+#
+# ZIA API REFERENCE:
+#   https://help.zscaler.com/zia/api
+#   https://github.com/zscaler/zscaler-ansible
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# ZIA LOCATION DEFAULTS
+# ---------------------------------------------------------------------------
+# These defaults are applied to every location unless explicitly overridden
+# in the location definition (vars/locations/bulk_locations.yml).
+
+zia_location_defaults:
+  # Authentication profile for the location
+  # Options: NONE, BASIC, DIGEST, KERBEROS, NTLM, FORM_BASED
+  auth_required: true
+
+  # Enable SSL inspection at this location
+  # IMPORTANT: Requires SSL inspection certificate deployed to endpoints
+  ssl_scan_enabled: false
+
+  # Enable Zscaler App (ZApp) for this location
+  # When true, users at this location use ZApp for authentication
+  zapp_ssl_scan_enabled: false
+
+  # Enable XFF (X-Forwarded-For) forwarding
+  # Required when using proxy chaining or load balancers
+  xff_forward_enabled: false
+
+  # Enable Surrogate IP (maps IP to user identity)
+  # Required for locations without user authentication
+  surrogate_ip: false
+
+  # Idle time before surrogate IP mapping expires (minutes)
+  surrogate_ip_enforced_for_known_browsers: false
+  idle_time_in_minutes: 0
+
+  # Display time unit for bandwidth policies
+  # Options: MINUTE, HOUR, DAY
+  display_time_unit: "HOUR"
+
+  # Enable bandwidth control
+  up_bandwidth: 0                  # 0 = unlimited
+  dn_bandwidth: 0                  # 0 = unlimited
+
+  # Country code for the location (ISO 3166-1 alpha-2)
+  # Used for geo-based policy enforcement
+  # country: "US"  # Set per-location
+
+  # Time zone for the location
+  # Used for time-based policy enforcement
+  # tz: "US/Eastern"  # Set per-location
+
+  # IP addresses associated with this location
+  # These are the egress IPs for the location
+  # ip_addresses: []  # Set per-location
+
+  # VPN credentials (if using IPSec/GRE)
+  # vpn_credentials: []  # Set per-location
+
+  # Parent location ID (for sub-locations only)
+  # parent_id: null  # Set for sub-locations
+
+  # Profile for the location
+  # Options: NONE, CORPORATE, SERVER, GUESTWIFI, IOT, WORKLOAD
+  profile: "CORPORATE"
+
+  # Comments/description for the location
+  # description: ""  # Set per-location
+
+# ---------------------------------------------------------------------------
+# ZIA SUB-LOCATION DEFAULTS
+# ---------------------------------------------------------------------------
+zia_sub_location_defaults:
+  # Sub-locations inherit most settings from parent
+  # These are the sub-location-specific defaults
+
+  # IP ranges for the sub-location (CIDR notation)
+  # ip_addresses: []  # Required — set per sub-location
+
+  # Bandwidth limits for sub-location (can differ from parent)
+  up_bandwidth: 0
+  dn_bandwidth: 0
+
+  # Authentication for sub-location
+  auth_required: true
+
+  # Profile for sub-location
+  profile: "CORPORATE"
+
+# ---------------------------------------------------------------------------
+# ZIA GRE TUNNEL DEFAULTS
+# ---------------------------------------------------------------------------
+zia_gre_tunnel_defaults:
+  # GRE tunnel comment/description
+  # comment: ""  # Set per tunnel
+
+  # Within country routing preference
+  # When true, traffic stays within the same country
+  within_country: true
+
+  # IP unnumbered (for unnumbered GRE tunnels)
+  ip_unnumbered: false
+
+  # Internal IP range for GRE tunnel
+  # internal_ip_range: ""  # Set per tunnel
+
+  # Country code for the GRE tunnel endpoint
+  # country_code: "US"  # Set per tunnel
+
+# ---------------------------------------------------------------------------
+# ZIA URL CATEGORY DEFAULTS (for domain blocking)
+# ---------------------------------------------------------------------------
+zia_url_category_defaults:
+  # Type of URL category
+  # Options: URL_CATEGORY, TLD_CATEGORY
+  type: "URL_CATEGORY"
+
+  # Super category (parent category)
+  super_category: "USER_DEFINED"
+
+  # URLs to include in the category
+  # urls: []  # Set per category
+
+  # Keywords associated with this category
+  # keywords: []  # Optional
+
+  # Custom category flag
+  custom_category: true
+
+  # Editable flag
+  editable: true
+
+# ---------------------------------------------------------------------------
+# ZIA FIREWALL RULE DEFAULTS (for domain blocking enforcement)
+# ---------------------------------------------------------------------------
+zia_firewall_rule_defaults:
+  # Rule action
+  # Options: ALLOW, BLOCK_DROP, BLOCK_RESET, BLOCK_ICMP, EVAL_NWAPP
+  action: "BLOCK_DROP"
+
+  # Rule state
+  # Options: ENABLED, DISABLED
+  state: "ENABLED"
+
+  # Log traffic matching this rule
+  enable_full_logging: true
+
+  # Rule order (lower = higher priority)
+  # order: 1  # Set per rule
+
+# ---------------------------------------------------------------------------
+# ZIA API PAGINATION DEFAULTS
+# ---------------------------------------------------------------------------
+# ZIA API returns paginated results for large datasets
+# These settings control how we handle pagination
+
+zia_api_page_size: 1000           # Max items per API page (ZIA max is 1000)
+zia_api_max_pages: 100            # Safety limit on pagination loops
+
+# ---------------------------------------------------------------------------
+# ZIA ACTIVATION SETTINGS
+# ---------------------------------------------------------------------------
+# After making changes via API, ZIA requires explicit activation
+# to push changes to the Zscaler cloud enforcement nodes.
+#
+# IMPORTANT: Without activation, changes are saved but NOT enforced.
+# Always activate after making changes in production.
+
+zia_auto_activate: true           # Automatically activate after changes
+zia_activation_timeout: 300       # Seconds to wait for activation (5 min)
+
+# ---------------------------------------------------------------------------
+# LOCATION NAMING CONVENTIONS
+# ---------------------------------------------------------------------------
+# Enforce consistent naming across all locations.
+# These patterns are validated in the location management role.
+
+# Location name must match this regex pattern
+# Example: "NYC-HQ-01", "LAX-BRANCH-03", "LON-OFFICE-02"
+location_name_pattern: "^[A-Z]{2,5}-[A-Z0-9-]+-[0-9]{2}$"
+
+# Maximum location name length (ZIA limit)
+location_name_max_length: 64
+
+# Sub-location name pattern (inherits parent prefix)
+# Example: "NYC-HQ-01-FLOOR3", "NYC-HQ-01-WIFI"
+sub_location_name_pattern: "^[A-Z]{2,5}-[A-Z0-9-]+-[0-9]{2}-[A-Z0-9-]+$"
+
+# ---------------------------------------------------------------------------
+# SUPPORTED ZIA CLOUDS
+# ---------------------------------------------------------------------------
+# Valid ZIA cloud names. Used for validation in the common role.
+zia_supported_clouds:
+  - zscaler
+  - zscloud
+  - zscalertwo
+  - zscalerthree
+  - zscalerbeta
+  - zspreview
+  - zscalerone
+  - zscalergov

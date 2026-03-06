@@ -1,0 +1,117 @@
+# =============================================================================
+# vars/tenants/tenant_map.yml — Multi-Tenant Configuration Map
+# =============================================================================
+# PURPOSE:
+#   Maps ZIA tenants to their configuration, Vault paths, and location files.
+#   This enables a single automation framework to manage multiple ZIA tenants
+#   (e.g., different business units, subsidiaries, or geographic regions).
+#
+# MULTI-TENANT STRATEGY:
+#   Each tenant is an independent ZIA cloud instance with its own:
+#   - API credentials (stored in separate Vault paths)
+#   - Location definitions (separate vars files)
+#   - Policy configurations
+#   - Enforcement nodes
+#
+# HOW IT'S USED:
+#   The site.yml playbook can iterate over this map to apply changes
+#   to multiple tenants in sequence. Each tenant's credentials are
+#   retrieved from Vault independently.
+#
+# ADDING A NEW TENANT:
+#   1. Add entry to this file
+#   2. Store credentials in Vault: vault kv put secret/zia/<tenant_id>/credentials ...
+#   3. Create location file: vars/locations/bulk_locations_<tenant_id>.yml
+#   4. Add host to inventory: inventories/production/hosts.yml
+# =============================================================================
+
+---
+zia_tenant_map:
+
+  # ---------------------------------------------------------------------------
+  # US PRIMARY TENANT
+  # ---------------------------------------------------------------------------
+  us_primary:
+    # Inventory hostname (must match inventories/production/hosts.yml)
+    inventory_host: "zia_tenant_us_primary"
+
+    # ZIA cloud name
+    zia_cloud: "zscaler"
+
+    # HashiCorp Vault path for credentials
+    vault_path: "secret/zia/us_primary/credentials"
+
+    # Human-readable description
+    description: "US Primary ZIA Tenant - Main Production"
+
+    # Geographic region
+    region: "us"
+
+    # Location data files for this tenant
+    locations_file: "vars/locations/bulk_locations.yml"
+    sub_locations_file: "vars/locations/sub_locations.yml"
+    gre_tunnels_file: "vars/locations/gre_tunnels.yml"
+
+    # Tenant-specific settings
+    auto_activate: true
+    max_locations: 500             # Maximum locations this tenant supports
+
+    # Contact information for this tenant
+    owner: "network-ops@corp.example.com"
+    escalation: "network-ops-lead@corp.example.com"
+
+  # ---------------------------------------------------------------------------
+  # US SECONDARY TENANT (Subsidiary)
+  # ---------------------------------------------------------------------------
+  us_secondary:
+    inventory_host: "zia_tenant_us_secondary"
+    zia_cloud: "zscloud"
+    vault_path: "secret/zia/us_secondary/credentials"
+    description: "US Secondary ZIA Tenant - Subsidiary Company"
+    region: "us"
+    locations_file: "vars/locations/bulk_locations_secondary.yml"
+    sub_locations_file: "vars/locations/sub_locations_secondary.yml"
+    gre_tunnels_file: "vars/locations/gre_tunnels_secondary.yml"
+    auto_activate: true
+    max_locations: 200
+    owner: "subsidiary-netops@corp.example.com"
+    escalation: "network-ops-lead@corp.example.com"
+
+  # ---------------------------------------------------------------------------
+  # EU PRIMARY TENANT (GDPR Compliant)
+  # ---------------------------------------------------------------------------
+  eu_primary:
+    inventory_host: "zia_tenant_eu_primary"
+    zia_cloud: "zscalertwo"
+    vault_path: "secret/zia/eu_primary/credentials"
+    description: "EU Primary ZIA Tenant - GDPR Data Residency"
+    region: "eu"
+    locations_file: "vars/locations/bulk_locations_eu.yml"
+    sub_locations_file: "vars/locations/sub_locations_eu.yml"
+    gre_tunnels_file: "vars/locations/gre_tunnels_eu.yml"
+    auto_activate: true
+    max_locations: 300
+
+    # GDPR-specific settings
+    gdpr_compliant: true
+    data_residency: "EU"           # Enforce EU data residency
+
+    owner: "eu-netops@corp.example.com"
+    escalation: "network-ops-lead@corp.example.com"
+
+  # ---------------------------------------------------------------------------
+  # APAC PRIMARY TENANT
+  # ---------------------------------------------------------------------------
+  apac_primary:
+    inventory_host: "zia_tenant_apac_primary"
+    zia_cloud: "zscalerthree"
+    vault_path: "secret/zia/apac_primary/credentials"
+    description: "APAC Primary ZIA Tenant"
+    region: "apac"
+    locations_file: "vars/locations/bulk_locations_apac.yml"
+    sub_locations_file: "vars/locations/sub_locations_apac.yml"
+    gre_tunnels_file: "vars/locations/gre_tunnels_apac.yml"
+    auto_activate: true
+    max_locations: 200
+    owner: "apac-netops@corp.example.com"
+    escalation: "network-ops-lead@corp.example.com"

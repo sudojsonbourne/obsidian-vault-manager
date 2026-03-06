@@ -1,0 +1,266 @@
+## Juniper JunOS Hierarchical Configuration — Sample
+## Device: JNP-Router-Edge-1 (MX204)
+## Format: Hierarchical (curly-brace)
+## Compatible with: NetDiagram Juniper parser
+
+version 22.4R1.10;
+
+system {
+    host-name JNP-Router-Edge-1;
+    domain-name corp.example.com;
+    time-zone America/Chicago;
+    root-authentication {
+        encrypted-password "$6$xyz$abc123";
+    }
+    services {
+        ssh {
+            root-login deny;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    syslog {
+        host 10.0.1.100 {
+            any notice;
+        }
+    }
+    ntp {
+        server 10.0.1.100;
+    }
+}
+
+chassis {
+    description "Juniper MX204";
+    fpc 0 {
+        pic 0 {
+            number-of-ports 4;
+        }
+    }
+}
+
+interfaces {
+    ge-0/0/0 {
+        description "WAN Uplink to ISP-A";
+        speed 1g;
+        unit 0 {
+            description "ISP-A Transit Link";
+            family inet {
+                address 198.51.100.2/30;
+            }
+            family inet6 {
+                address 2001:db8:1::2/64;
+            }
+        }
+    }
+    ge-0/0/1 {
+        description "Peering to Cisco-Core";
+        speed 1g;
+        unit 0 {
+            description "Core Link ge-0/0/1.0";
+            family inet {
+                address 10.0.0.2/30;
+            }
+        }
+    }
+    ge-0/0/2 {
+        description "DMZ Segment";
+        speed 1g;
+        unit 0 {
+            description "DMZ Access";
+            family inet {
+                address 172.16.10.1/24;
+            }
+        }
+    }
+    ge-0/0/3 {
+        description "Server LAN";
+        speed 1g;
+        unit 100 {
+            description "Servers VLAN 100";
+            vlan-id 100;
+            family inet {
+                address 10.10.100.1/24;
+            }
+        }
+        unit 200 {
+            description "Management VLAN 200";
+            vlan-id 200;
+            family inet {
+                address 10.10.200.1/24;
+            }
+        }
+    }
+    ae0 {
+        description "LAG to Core Switch";
+        aggregated-ether-options {
+            lacp {
+                active;
+            }
+        }
+        unit 0 {
+            family inet {
+                address 10.0.1.1/30;
+            }
+        }
+    }
+    lo0 {
+        description "Loopback";
+        unit 0 {
+            family inet {
+                address 192.168.255.10/32;
+            }
+            family inet6 {
+                address 2001:db8:255::10/128;
+            }
+        }
+    }
+    irb {
+        unit 300 {
+            description "Voice VLAN IRB";
+            family inet {
+                address 172.16.30.1/24;
+            }
+        }
+    }
+}
+
+vlans {
+    servers {
+        vlan-id 100;
+        l3-interface ge-0/0/3.100;
+    }
+    mgmt {
+        vlan-id 200;
+        l3-interface ge-0/0/3.200;
+    }
+    voice {
+        vlan-id 300;
+        l3-interface irb.300;
+    }
+}
+
+routing-options {
+    autonomous-system 65010;
+    router-id 192.168.255.10;
+    static {
+        route 0.0.0.0/0 next-hop 198.51.100.1;
+        route 10.0.0.0/8 next-hop 10.0.0.1;
+        route 192.168.100.0/24 next-hop 10.0.1.2;
+    }
+}
+
+protocols {
+    ospf {
+        area 0.0.0.0 {
+            interface ge-0/0/1.0 {
+                interface-type p2p;
+            }
+            interface ae0.0 {
+                interface-type p2p;
+            }
+            interface lo0.0 {
+                passive;
+            }
+        }
+    }
+    bgp {
+        group ISP-EBGP {
+            type external;
+            neighbor 198.51.100.1 {
+                description "ISP-A BGP Peer";
+                peer-as 65001;
+            }
+        }
+        group IBGP-CORE {
+            type internal;
+            neighbor 192.168.255.1 {
+                description "Cisco-Core-1 iBGP";
+                peer-as 65010;
+            }
+        }
+    }
+    lldp {
+        interface ge-0/0/0;
+        interface ge-0/0/1;
+        interface ge-0/0/2;
+    }
+}
+
+security {
+    zones {
+        security-zone untrust {
+            interfaces {
+                ge-0/0/0.0;
+            }
+        }
+        security-zone trust {
+            interfaces {
+                ge-0/0/1.0;
+                ge-0/0/3.100;
+                ge-0/0/3.200;
+                ae0.0;
+            }
+        }
+        security-zone dmz {
+            interfaces {
+                ge-0/0/2.0;
+            }
+        }
+    }
+    policies {
+        from-zone trust to-zone untrust {
+            policy allow-outbound {
+                match {
+                    source-address any;
+                    destination-address any;
+                    application any;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone untrust to-zone dmz {
+            policy allow-inbound-web {
+                match {
+                    source-address any;
+                    destination-address 172.16.10.0/24;
+                    application junos-http;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+    }
+}
+
+firewall {
+    filter PROTECT-RE {
+        term allow-ospf {
+            from {
+                protocol ospf;
+            }
+            then accept;
+        }
+        term allow-bgp {
+            from {
+                protocol tcp;
+                destination-port bgp;
+            }
+            then accept;
+        }
+        term allow-icmp {
+            from {
+                protocol icmp;
+            }
+            then accept;
+        }
+        term deny-all {
+            then {
+                reject;
+            }
+        }
+    }
+}

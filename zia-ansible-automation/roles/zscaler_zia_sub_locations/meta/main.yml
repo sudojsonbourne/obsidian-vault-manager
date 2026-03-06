@@ -1,0 +1,15 @@
+# =============================================================================
+# roles/zscaler_zia_sub_locations/meta/main.yml
+# =============================================================================
+---
+galaxy_info:
+  role_name: zscaler_zia_sub_locations
+  author: "Network Automation Team"
+  description: "Manages ZIA sub-locations with parent dependency enforcement"
+  min_ansible_version: "2.14"
+
+dependencies:
+  - role: common
+  # Sub-locations depend on locations existing first
+  # Enforced by play ordering in site.yml, not role dependency
+  # (to avoid running location role twice)

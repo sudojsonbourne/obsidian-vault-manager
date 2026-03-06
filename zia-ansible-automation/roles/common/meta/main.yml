@@ -1,0 +1,21 @@
+# =============================================================================
+# roles/common/meta/main.yml — Common Role Metadata
+# =============================================================================
+---
+galaxy_info:
+  role_name: common
+  author: "Network Automation Team"
+  description: "Common tasks for ZIA automation — Vault auth, preflight, logging"
+  company: "Corp"
+  license: "MIT"
+  min_ansible_version: "2.14"
+  platforms:
+    - name: all
+  galaxy_tags:
+    - zscaler
+    - zia
+    - vault
+    - security
+
+# No external role dependencies — this IS the base role
+dependencies: []

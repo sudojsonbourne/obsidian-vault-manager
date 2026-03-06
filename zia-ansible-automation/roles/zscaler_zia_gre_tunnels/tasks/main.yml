@@ -1,0 +1,107 @@
+# =============================================================================
+# roles/zscaler_zia_gre_tunnels/tasks/main.yml — GRE Tunnel Management
+# =============================================================================
+# PURPOSE:
+#   Manages ZIA GRE tunnels with full pre-flight IP/ASN validation.
+#   GRE tunnels connect on-premises locations to Zscaler enforcement nodes.
+#
+# GRE TUNNEL ARCHITECTURE:
+#   Each location typically has:
+#   - Primary GRE tunnel (active path)
+#   - Secondary GRE tunnel (failover path)
+#   Both tunnels connect to different Zscaler data centers for redundancy.
+#
+# EXECUTION ORDER:
+#   1. Load GRE tunnel definitions
+#   2. Validate all tunnel parameters (IP, ASN, required fields)
+#   3. Create/update tunnels (state=present)
+#   4. Delete tunnels (state=absent, requires force=true)
+#   5. Activate ZIA
+# =============================================================================
+
+---
+- name: "GRE | Load GRE tunnel definitions"
+  ansible.builtin.include_vars:
+    file: "{{ zia_gre_tunnels_file | default('vars/locations/gre_tunnels.yml') }}"
+  tags:
+    - always
+    - gre
+
+- name: "GRE | Run pre-flight validation"
+  ansible.builtin.include_tasks:
+    file: validate.yml
+  tags:
+    - always
+    - validate
+
+- name: "GRE | Process tunnels with state=present"
+  ansible.builtin.include_tasks:
+    file: create.yml
+  loop: "{{ zia_gre_tunnels | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    loop_var: tunnel_item
+    label: "{{ tunnel_item.source_ip }} → {{ tunnel_item.location_name }}"
+    pause: "{{ zia_api_rate_limit_delay }}"
+  tags:
+    - create
+    - gre
+
+- name: "GRE | Check force flag before deletion"
+  ansible.builtin.assert:
+    that:
+      - force | bool
+    fail_msg: |
+      ❌ DELETION BLOCKED: force=true required to delete GRE tunnels!
+      Run with: --extra-vars "force=true"
+    success_msg: "✅ Force flag confirmed for GRE tunnel deletion"
+  when:
+    - zia_gre_tunnels | selectattr('state', 'equalto', 'absent') | list | length > 0
+    - not ansible_check_mode
+  tags:
+    - delete
+    - gre
+
+- name: "GRE | Process tunnels with state=absent"
+  ansible.builtin.include_tasks:
+    file: delete.yml
+  loop: "{{ zia_gre_tunnels | selectattr('state', 'equalto', 'absent') | list }}"
+  loop_control:
+    loop_var: tunnel_item
+    label: "{{ tunnel_item.source_ip }}"
+    pause: "{{ zia_api_rate_limit_delay }}"
+  when:
+    - zia_gre_tunnels | selectattr('state', 'equalto', 'absent') | list | length > 0
+    - force | bool or ansible_check_mode
+  tags:
+    - delete
+    - gre
+
+- name: "GRE | Activate ZIA"
+  zscaler.ziacloud.zia_activation_status:
+    status: "ACTIVE"
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+  when:
+    - zia_auto_activate | default(true)
+    - not ansible_check_mode
+  no_log: true
+  tags:
+    - activate
+    - gre
+
+- name: "GRE | Print post-run summary"
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════╗
+      ║              GRE TUNNEL MANAGEMENT — COMPLETE                ║
+      ╚══════════════════════════════════════════════════════════════╝
+      Tunnels processed:  {{ zia_gre_tunnels | length }}
+      Created/Updated:    {{ zia_gre_tunnels | selectattr('state', 'equalto', 'present') | list | length }}
+      Deleted:            {{ zia_gre_tunnels | selectattr('state', 'equalto', 'absent') | list | length }}
+      Check mode:         {{ ansible_check_mode }}
+      ══════════════════════════════════════════════════════════════
+  tags:
+    - always
+    - gre

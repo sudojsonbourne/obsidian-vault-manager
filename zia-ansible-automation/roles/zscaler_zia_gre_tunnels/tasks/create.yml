@@ -1,0 +1,68 @@
+# =============================================================================
+# roles/zscaler_zia_gre_tunnels/tasks/create.yml — GRE Tunnel Create/Update
+# =============================================================================
+# PURPOSE:
+#   Creates or updates a single GRE tunnel.
+#   Handles both primary and secondary tunnel configurations.
+# =============================================================================
+
+---
+- name: "GRE-CREATE | Log tunnel being processed"
+  ansible.builtin.debug:
+    msg: |
+      🔗 Processing GRE tunnel:
+         Location:    {{ tunnel_item.location_name }}
+         Source IP:   {{ tunnel_item.source_ip }}
+         Type:        {{ tunnel_item.tunnel_type | default('GRE') }}
+         Primary:     {{ tunnel_item.primary_dest_vip | default('auto-assigned') }}
+         Secondary:   {{ tunnel_item.secondary_dest_vip | default('auto-assigned') }}
+         Within Country: {{ tunnel_item.within_country | default(false) }}
+  tags:
+    - create
+
+- name: "GRE-CREATE | Create or update GRE tunnel: {{ tunnel_item.source_ip }}"
+  zscaler.ziacloud.zia_traffic_forwarding_gre_tunnels:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+
+    # Source IP — the public IP of the on-premises router/firewall
+    # This is the tunnel endpoint on the customer side
+    source_ip: "{{ tunnel_item.source_ip }}"
+
+    # State: present = create or update
+    state: "{{ tunnel_item.state }}"
+
+    # Primary destination VIP — Zscaler enforcement node (primary)
+    # If not specified, ZIA auto-assigns the nearest VIP
+    primary_dest_vip:
+      id: "{{ tunnel_item.primary_dest_vip_id | default(omit) }}"
+
+    # Secondary destination VIP — Zscaler enforcement node (failover)
+    # Should be in a different data center than primary for redundancy
+    secondary_dest_vip:
+      id: "{{ tunnel_item.secondary_dest_vip_id | default(omit) }}"
+
+    # Within-country routing — keep traffic within the same country
+    # Required for data residency compliance (GDPR, etc.)
+    within_country: "{{ tunnel_item.within_country | default(false) }}"
+
+    # IP unnumbered — use unnumbered IP for the tunnel interface
+    ip_unnumbered: "{{ tunnel_item.ip_unnumbered | default(false) }}"
+
+    # Comment/description for this tunnel
+    comment: "{{ tunnel_item.comment | default('GRE tunnel managed by Ansible - ' + tunnel_item.location_name) }}"
+
+  register: gre_result
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+  no_log: true
+  tags:
+    - create
+
+- name: "GRE-CREATE | Report result: {{ tunnel_item.source_ip }}"
+  ansible.builtin.debug:
+    msg: "{{ '✅ CHANGED' if gre_result.changed else 'ℹ️  NO CHANGE' }}: GRE tunnel {{ tunnel_item.source_ip }} ({{ tunnel_item.location_name }})"
+  tags:
+    - create

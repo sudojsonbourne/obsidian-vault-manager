@@ -1,0 +1,270 @@
+# =============================================================================
+# roles/common/tasks/vault_auth.yml — HashiCorp Vault Credential Retrieval
+# =============================================================================
+# PURPOSE:
+#   This task file is the SINGLE point of credential retrieval for the entire
+#   ZIA automation framework. ALL roles include this file before making any
+#   ZIA API calls.
+#
+# SECURITY ARCHITECTURE:
+#   ┌─────────────────────────────────────────────────────────────────┐
+#   │  Ansible Control Node                                           │
+#   │  ┌─────────────────┐    lookup()    ┌──────────────────────┐   │
+#   │  │  Playbook/Role  │ ─────────────► │  HashiCorp Vault     │   │
+#   │  │                 │ ◄───────────── │  (local instance)    │   │
+#   │  │  zia_api_key    │   credentials  │  secret/zia/*/creds  │   │
+#   │  │  zia_username   │                └──────────────────────┘   │
+#   │  │  zia_password   │                                           │
+#   │  └────────┬────────┘                                           │
+#   │           │ ZIA API calls (HTTPS)                              │
+#   └───────────┼─────────────────────────────────────────────────────┘
+#               ▼
+#   ┌─────────────────────────────────────────────────────────────────┐
+#   │  Zscaler ZIA Cloud API                                          │
+#   └─────────────────────────────────────────────────────────────────┘
+#
+# CREDENTIAL FLOW:
+#   1. This task file is included at the start of every role
+#   2. It retrieves credentials from Vault using the lookup plugin
+#   3. Credentials are stored as Ansible facts (in memory only)
+#   4. Facts are used by subsequent ZIA API tasks
+#   5. Facts are NOT written to disk, logs, or output
+#
+# FAIL-SAFE BEHAVIOR:
+#   - If Vault is unreachable: FAIL immediately (no fallback)
+#   - If secret path doesn't exist: FAIL with descriptive error
+#   - If required keys are missing: FAIL with descriptive error
+#   - Credentials are NEVER logged (no_log: true on all tasks)
+#
+# VAULT PATH STRUCTURE:
+#   The vault_zia_path variable is set per-host in the inventory:
+#   inventories/production/hosts.yml:
+#     zia_tenant_us_primary:
+#       vault_zia_path: "secret/zia/us_primary/credentials"
+#
+# USAGE:
+#   Include this file at the start of any role that needs ZIA credentials:
+#   - name: Retrieve ZIA credentials from Vault
+#     ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/vault_auth.yml"
+#
+# TROUBLESHOOTING:
+#   If this task fails, check:
+#   1. VAULT_ADDR environment variable is set correctly
+#   2. VAULT_TOKEN (or VAULT_ROLE_ID/VAULT_SECRET_ID) is valid
+#   3. Vault policy allows read access to the secret path
+#   4. The secret path exists: vault kv get {{ vault_zia_path }}
+#   5. All required keys (api_key, username, password) are present
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# STEP 1: VALIDATE VAULT CONNECTIVITY PREREQUISITES
+# ---------------------------------------------------------------------------
+# Before attempting to retrieve secrets, validate that the required
+# environment variables are set. This provides a clear error message
+# rather than a cryptic Vault connection error.
+
+- name: "VAULT AUTH | Validate VAULT_ADDR environment variable is set"
+  # This task checks that VAULT_ADDR is set before attempting connection.
+  # Without this, the error message from the lookup plugin is confusing.
+  ansible.builtin.assert:
+    that:
+      # Check that VAULT_ADDR env var is not empty
+      - lookup('env', 'VAULT_ADDR') | length > 0
+    fail_msg: |
+      ❌ VAULT_ADDR environment variable is not set!
+
+      The ZIA automation framework requires HashiCorp Vault for credential
+      management. Please set the following environment variables:
+
+        export VAULT_ADDR=https://vault.corp.example.com:8200
+        export VAULT_TOKEN=<your-vault-token>
+
+      Or for AppRole authentication:
+        export VAULT_ADDR=https://vault.corp.example.com:8200
+        export VAULT_ROLE_ID=<your-role-id>
+        export VAULT_SECRET_ID=<your-secret-id>
+
+      See docs/RUNBOOK.md for detailed setup instructions.
+    success_msg: "✅ VAULT_ADDR is configured: {{ lookup('env', 'VAULT_ADDR') }}"
+  # Tags allow selective execution
+  tags:
+    - always
+    - vault
+    - preflight
+
+- name: "VAULT AUTH | Validate Vault authentication credentials are available"
+  # Check that either VAULT_TOKEN or VAULT_ROLE_ID is set
+  ansible.builtin.assert:
+    that:
+      - (lookup('env', 'VAULT_TOKEN') | length > 0) or
+        (lookup('env', 'VAULT_ROLE_ID') | length > 0)
+    fail_msg: |
+      ❌ No Vault authentication credentials found!
+
+      Please set one of the following:
+
+      Option 1 - Token auth (development):
+        export VAULT_TOKEN=<your-vault-token>
+
+      Option 2 - AppRole auth (CI/CD - recommended):
+        export VAULT_ROLE_ID=<your-role-id>
+        export VAULT_SECRET_ID=<your-secret-id>
+
+      NEVER store tokens in files or version control.
+    success_msg: "✅ Vault authentication credentials are available"
+  tags:
+    - always
+    - vault
+    - preflight
+
+# ---------------------------------------------------------------------------
+# STEP 2: RETRIEVE ZIA CREDENTIALS FROM VAULT
+# ---------------------------------------------------------------------------
+# Use the community.hashi_vault lookup plugin to retrieve credentials.
+# The lookup returns a dictionary with all keys from the Vault secret.
+#
+# IMPORTANT: no_log: true prevents credentials from appearing in:
+#   - Ansible output (stdout)
+#   - Log files
+#   - Callback plugins
+#   - CI/CD pipeline logs
+#
+# The vault_zia_path variable is set per-host in the inventory.
+# Example: "secret/zia/us_primary/credentials"
+#
+# For KV v2 (recommended), the path format is:
+#   "secret/data/zia/us_primary/credentials" (with /data/ prefix)
+# The hashi_vault lookup handles this automatically when kv_engine_mount_point is set.
+
+- name: "VAULT AUTH | Retrieve ZIA credentials from HashiCorp Vault"
+  # This is the core credential retrieval task.
+  # The lookup plugin connects to Vault and returns the secret as a dict.
+  ansible.builtin.set_fact:
+    # Store the entire secret dict as a fact
+    # Access individual keys: zia_vault_credentials['api_key']
+    zia_vault_credentials: >-
+      {{ lookup(
+        'community.hashi_vault.hashi_vault',
+        vault_zia_path,
+        url=vault_addr,
+        auth_method=vault_auth_method,
+        validate_certs=vault_validate_certs,
+        engine_mount_point='secret',
+        errors='strict'
+      ) }}
+  # CRITICAL: no_log prevents credentials from being logged ANYWHERE
+  no_log: true
+  # Retry on transient Vault failures (network blips, Vault restarts)
+  retries: "{{ vault_retry_count }}"
+  delay: "{{ vault_retry_delay }}"
+  register: vault_lookup_result
+  until: vault_lookup_result is not failed
+  tags:
+    - always
+    - vault
+
+# ---------------------------------------------------------------------------
+# STEP 3: VALIDATE RETRIEVED CREDENTIALS
+# ---------------------------------------------------------------------------
+# After retrieval, validate that all required keys are present.
+# This catches misconfigured Vault secrets early, before any API calls.
+
+- name: "VAULT AUTH | Validate all required credential keys are present"
+  ansible.builtin.assert:
+    that:
+      # Check each required key exists and is not empty
+      - zia_vault_credentials is defined
+      - zia_vault_credentials is not none
+      - item in zia_vault_credentials
+      - zia_vault_credentials[item] | length > 0
+    fail_msg: |
+      ❌ Required credential key '{{ item }}' is missing or empty in Vault!
+
+      Vault path: {{ vault_zia_path }}
+      Expected keys: {{ vault_zia_required_keys | join(', ') }}
+
+      To fix this, run:
+        vault kv put {{ vault_zia_path }} \
+          api_key="<your-api-key>" \
+          username="<your-username>" \
+          password="<your-password>"
+
+      Then verify:
+        vault kv get {{ vault_zia_path }}
+    success_msg: "✅ Credential key '{{ item }}' is present"
+  # Loop over all required keys
+  loop: "{{ vault_zia_required_keys }}"
+  # CRITICAL: no_log prevents key names from being logged with values
+  no_log: true
+  tags:
+    - always
+    - vault
+
+# ---------------------------------------------------------------------------
+# STEP 4: SET INDIVIDUAL CREDENTIAL FACTS
+# ---------------------------------------------------------------------------
+# Extract individual credentials from the vault dict and set as facts.
+# These facts are used by ZIA module tasks throughout the role.
+#
+# WHY SEPARATE FACTS?
+#   The ZIA Ansible collection modules expect individual credential parameters:
+#     username: "{{ zia_username }}"
+#     password: "{{ zia_password }}"
+#     api_key: "{{ zia_api_key }}"
+#     cloud: "{{ zia_cloud }}"
+#   Having them as separate facts makes the module calls cleaner.
+
+- name: "VAULT AUTH | Set ZIA credential facts from Vault secret"
+  ansible.builtin.set_fact:
+    # ZIA API key (used for API authentication)
+    zia_api_key: "{{ zia_vault_credentials['api_key'] }}"
+    # ZIA admin username
+    zia_username: "{{ zia_vault_credentials['username'] }}"
+    # ZIA admin password
+    zia_password: "{{ zia_vault_credentials['password'] }}"
+    # ZIA cloud name (from inventory, not Vault — it's not a secret)
+    # This is set in the inventory: zia_cloud: "zscaler"
+    # zia_cloud is already set from inventory vars
+  # CRITICAL: no_log prevents credential values from being logged
+  no_log: true
+  tags:
+    - always
+    - vault
+
+# ---------------------------------------------------------------------------
+# STEP 5: CONFIRM SUCCESSFUL CREDENTIAL RETRIEVAL (SAFE LOG)
+# ---------------------------------------------------------------------------
+# Log a SUCCESS message WITHOUT any credential values.
+# This confirms the retrieval worked without exposing secrets.
+
+- name: "VAULT AUTH | Confirm credentials retrieved successfully"
+  ansible.builtin.debug:
+    msg: |
+      ✅ ZIA credentials retrieved successfully from HashiCorp Vault
+         Vault path:  {{ vault_zia_path }}
+         ZIA cloud:   {{ zia_cloud }}
+         Username:    {{ zia_username | regex_replace('(?<=.).(?=.*@)', '*') }}
+         API key:     [REDACTED]
+         Password:    [REDACTED]
+  # Note: username is partially masked (shows first char + domain)
+  # api_key and password are fully redacted
+  tags:
+    - always
+    - vault
+
+# ---------------------------------------------------------------------------
+# STEP 6: CLEAN UP VAULT CREDENTIALS DICT
+# ---------------------------------------------------------------------------
+# After extracting individual facts, remove the raw credentials dict
+# to minimize the window where the full secret is in memory.
+# Individual facts (zia_api_key, etc.) remain for use by tasks.
+
+- name: "VAULT AUTH | Remove raw credentials dict from memory"
+  ansible.builtin.set_fact:
+    # Set to empty dict to clear the raw credentials
+    zia_vault_credentials: {}
+  no_log: true
+  tags:
+    - always
+    - vault

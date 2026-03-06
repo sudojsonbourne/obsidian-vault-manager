@@ -1,0 +1,106 @@
+# =============================================================================
+# roles/common/tasks/logging.yml — Structured Logging Initialization
+# =============================================================================
+# PURPOSE:
+#   Initializes structured logging for the ZIA automation run.
+#   Creates a JSON-formatted log entry at the start of each run
+#   for SIEM ingestion and audit trail purposes.
+#
+# LOG ENTRY STRUCTURE:
+#   {
+#     "timestamp": "2024-01-15T10:30:00Z",
+#     "level": "INFO",
+#     "event": "playbook_start",
+#     "playbook": "onboard_locations",
+#     "operator": "john.doe",
+#     "environment": "production",
+#     "tenant": "zia_tenant_us_primary",
+#     "zia_cloud": "zscaler",
+#     "git_commit": "abc123",
+#     "pipeline_id": "12345",
+#     "check_mode": false,
+#     "location_count": 25
+#   }
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# ENSURE LOG DIRECTORY EXISTS
+# ---------------------------------------------------------------------------
+
+- name: "LOGGING | Ensure log directory exists"
+  ansible.builtin.file:
+    path: "{{ log_file_path | dirname }}"
+    state: directory
+    mode: "0755"
+  # Run on localhost (control node) since logs are written there
+  delegate_to: localhost
+  # Ignore errors if directory already exists or permissions differ
+  ignore_errors: true
+  tags:
+    - logging
+    - always
+
+# ---------------------------------------------------------------------------
+# WRITE STRUCTURED LOG ENTRY
+# ---------------------------------------------------------------------------
+
+- name: "LOGGING | Write structured run start log entry"
+  ansible.builtin.lineinfile:
+    path: "{{ log_file_path }}"
+    line: >-
+      {{ {
+        'timestamp': ansible_date_time.iso8601,
+        'level': 'INFO',
+        'event': 'playbook_start',
+        'playbook': ansible_play_name | default('unknown'),
+        'operator': current_operator | default(lookup('env', 'USER')),
+        'environment': env | default('unknown'),
+        'tenant': inventory_hostname,
+        'zia_cloud': zia_cloud | default('unknown'),
+        'git_commit': current_git_commit | default('manual'),
+        'pipeline_id': current_pipeline_id | default('N/A'),
+        'check_mode': ansible_check_mode,
+        'location_count': zia_locations | default([]) | length,
+        'gre_tunnel_count': zia_gre_tunnels | default([]) | length
+      } | to_json }}
+    create: true
+    mode: "0640"
+  delegate_to: localhost
+  ignore_errors: true
+  tags:
+    - logging
+    - always
+
+# ---------------------------------------------------------------------------
+# AUDIT LOG FOR DESTRUCTIVE OPERATIONS
+# ---------------------------------------------------------------------------
+
+- name: "LOGGING | Write audit log entry for deletion operations"
+  ansible.builtin.lineinfile:
+    path: "{{ audit_log_path | default('/var/log/ansible/zia-audit.log') }}"
+    line: >-
+      {{ {
+        'timestamp': ansible_date_time.iso8601,
+        'level': 'AUDIT',
+        'event': 'deletion_planned',
+        'operator': current_operator | default(lookup('env', 'USER')),
+        'environment': env | default('unknown'),
+        'tenant': inventory_hostname,
+        'locations_to_delete': zia_locations | default([]) | selectattr('state', 'equalto', 'absent') | map(attribute='name') | list,
+        'force_flag': force | default(false),
+        'check_mode': ansible_check_mode
+      } | to_json }}
+    create: true
+    mode: "0640"
+  delegate_to: localhost
+  # Only write audit log if there are deletions planned
+  when:
+    - audit_log_enabled | default(true)
+    - zia_locations is defined
+    - zia_locations | selectattr('state', 'equalto', 'absent') | list | length > 0
+  ignore_errors: true
+  tags:
+    - logging
+    - audit
+    - always

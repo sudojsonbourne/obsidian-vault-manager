@@ -1,0 +1,14 @@
+# =============================================================================
+# roles/zscaler_zia_locations/meta/main.yml — Location Role Metadata
+# =============================================================================
+---
+galaxy_info:
+  role_name: zscaler_zia_locations
+  author: "Network Automation Team"
+  description: "Manages ZIA locations — create, update, delete with safety guards"
+  min_ansible_version: "2.14"
+
+dependencies:
+  # The common role MUST run before this role
+  # It handles Vault auth, preflight summary, and logging
+  - role: common

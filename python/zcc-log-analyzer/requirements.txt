@@ -1,0 +1,16 @@
+# ZCC Log Analyzer — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# ── Required ──────────────────────────────────────────────────────────────
+# Rich terminal output (color-coded tables, panels, progress)
+rich>=13.0.0
+
+# HTML report templating
+jinja2>=3.1.0
+
+# Flexible timestamp parsing (handles many date formats)
+python-dateutil>=2.8.0
+
+# ── Optional (for development / testing) ─────────────────────────────────
+# pytest>=7.0.0
+# pytest-cov>=4.0.0

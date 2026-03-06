@@ -1,0 +1,71 @@
+# =============================================================================
+# onboard_locations.yml — Bulk Location Onboarding Playbook
+# =============================================================================
+# PURPOSE:
+#   Dedicated playbook for bulk onboarding of new ZIA locations.
+#   Runs locations, sub-locations, and GRE tunnels in sequence.
+#   Optimized for the "day 1" onboarding workflow.
+#
+# USAGE:
+#   # Dry run first (ALWAYS do this before live run):
+#   ansible-playbook -i inventories/production onboard_locations.yml --check --diff
+#
+#   # Live run (production):
+#   ansible-playbook -i inventories/production onboard_locations.yml \
+#     --extra-vars "change_ticket=CHG0001234"
+#
+#   # Onboard specific region only:
+#   ansible-playbook -i inventories/production onboard_locations.yml \
+#     --extra-vars "location_filter_tag=us-east"
+#
+#   # Onboard single location (testing):
+#   ansible-playbook -i inventories/production onboard_locations.yml \
+#     --extra-vars "target_location=NYC-HQ-01"
+#
+#   # Staging environment:
+#   ansible-playbook -i inventories/staging onboard_locations.yml
+# =============================================================================
+
+---
+- name: "Onboard ZIA Locations"
+  hosts: zia_tenants
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: "ONBOARD | Print onboarding banner"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║              ZIA BULK LOCATION ONBOARDING                           ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+          This playbook will onboard locations, sub-locations, and GRE tunnels.
+          Environment: {{ env | default('NOT SET') }}
+          Tenant:      {{ inventory_hostname }}
+          Check mode:  {{ ansible_check_mode }}
+          ══════════════════════════════════════════════════════════════════════
+      tags:
+        - always
+
+  roles:
+    - role: common
+      tags: [always]
+    - role: zscaler_zia_locations
+      tags: [locations]
+    - role: zscaler_zia_sub_locations
+      tags: [sub-locations]
+    - role: zscaler_zia_gre_tunnels
+      tags: [gre]
+
+  post_tasks:
+    - name: "ONBOARD | Print completion banner"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║              ONBOARDING COMPLETE ✅                                  ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+          All locations, sub-locations, and GRE tunnels have been processed.
+          ZIA has been activated and changes are now live.
+          ══════════════════════════════════════════════════════════════════════
+      tags:
+        - always

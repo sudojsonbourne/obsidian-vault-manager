@@ -1,0 +1,182 @@
+# =============================================================================
+# group_vars/all/vault_config.yml — HashiCorp Vault Configuration
+# =============================================================================
+# PURPOSE:
+#   Defines HOW to connect to HashiCorp Vault for secret retrieval.
+#   This file contains connection parameters ONLY — no secrets.
+#
+# ARCHITECTURE:
+#   This project uses HashiCorp Vault as the single source of truth for
+#   all credentials. The lookup plugin 'community.hashi_vault.hashi_vault'
+#   is used to dynamically retrieve secrets at playbook runtime.
+#
+# VAULT SECRET STRUCTURE:
+#   The following Vault paths are used by this project:
+#
+#   secret/zia/<tenant>/credentials
+#     ├── api_key      — ZIA API key (obfuscated key)
+#     ├── username     — ZIA admin username
+#     └── password     — ZIA admin password
+#
+#   secret/notifications
+#     ├── slack_webhook_url  — Slack incoming webhook URL
+#     └── smtp_password      — SMTP password for email notifications
+#
+# VAULT SETUP COMMANDS:
+#   # Enable KV v2 secrets engine
+#   vault secrets enable -path=secret kv-v2
+#
+#   # Store ZIA credentials for US primary tenant
+#   vault kv put secret/zia/us_primary/credentials \
+#     api_key="your_api_key_here" \
+#     username="admin@corp.zscaler.net" \
+#     password="your_password_here"
+#
+#   # Verify the secret was stored
+#   vault kv get secret/zia/us_primary/credentials
+#
+# AUTHENTICATION METHODS SUPPORTED:
+#   1. Token auth (development/testing):
+#      Set VAULT_TOKEN environment variable
+#
+#   2. AppRole auth (CI/CD pipelines — RECOMMENDED for production):
+#      Set VAULT_ROLE_ID and VAULT_SECRET_ID environment variables
+#
+#   3. AWS IAM auth (if running on AWS):
+#      Set vault_auth_method: aws_iam
+#
+#   4. Kubernetes auth (if running in K8s):
+#      Set vault_auth_method: kubernetes
+#
+# SECURITY NOTES:
+#   - VAULT_TOKEN should NEVER be stored in files or version control
+#   - Use AppRole auth in CI/CD for short-lived, scoped tokens
+#   - Enable Vault audit logging for compliance
+#   - Use Vault policies to restrict access to only needed paths
+#
+# VAULT POLICY EXAMPLE (least-privilege):
+#   path "secret/data/zia/*" {
+#     capabilities = ["read"]
+#   }
+#   path "secret/data/notifications" {
+#     capabilities = ["read"]
+#   }
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# VAULT SERVER CONNECTION
+# ---------------------------------------------------------------------------
+# The Vault server address. This is NOT a secret — it's a connection endpoint.
+# In production, this should be a load-balanced Vault cluster address.
+#
+# OVERRIDE OPTIONS (in priority order):
+#   1. Environment variable: VAULT_ADDR=https://vault.corp.example.com:8200
+#   2. This variable: vault_addr
+#   3. Default below
+#
+# The lookup plugin will use VAULT_ADDR env var automatically if set.
+# We define it here as a fallback and for documentation purposes.
+vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('https://vault.corp.example.com:8200', true) }}"
+
+# ---------------------------------------------------------------------------
+# VAULT AUTHENTICATION METHOD
+# ---------------------------------------------------------------------------
+# Supported values:
+#   token      — Use VAULT_TOKEN env var (simple, good for dev)
+#   approle    — Use VAULT_ROLE_ID + VAULT_SECRET_ID (recommended for CI/CD)
+#   aws_iam    — Use AWS IAM role (for AWS-hosted control nodes)
+#   kubernetes — Use K8s service account (for K8s-hosted control nodes)
+#   ldap       — Use LDAP credentials
+vault_auth_method: "{{ lookup('env', 'VAULT_AUTH_METHOD') | default('token', true) }}"
+
+# ---------------------------------------------------------------------------
+# VAULT NAMESPACE (Vault Enterprise only)
+# ---------------------------------------------------------------------------
+# If using HashiCorp Vault Enterprise with namespaces, set this.
+# Leave empty for Vault OSS or if using the root namespace.
+vault_namespace: "{{ lookup('env', 'VAULT_NAMESPACE') | default('', true) }}"
+
+# ---------------------------------------------------------------------------
+# VAULT TLS SETTINGS
+# ---------------------------------------------------------------------------
+# Validate Vault's TLS certificate (ALWAYS true in production)
+# Only set to false in development with self-signed certs
+vault_validate_certs: true
+
+# Path to CA certificate bundle (if using internal CA)
+# vault_ca_cert: "/etc/ssl/certs/internal-ca.pem"
+
+# ---------------------------------------------------------------------------
+# VAULT KV ENGINE VERSION
+# ---------------------------------------------------------------------------
+# KV v2 supports secret versioning and metadata — use v2 in production
+# KV v1 is simpler but lacks versioning
+vault_kv_version: 2
+
+# ---------------------------------------------------------------------------
+# VAULT LOOKUP PLUGIN CONFIGURATION
+# ---------------------------------------------------------------------------
+# These are the default parameters passed to the hashi_vault lookup plugin.
+# They are assembled into a lookup string in the common/tasks/vault_auth.yml role.
+#
+# USAGE EXAMPLE in a task:
+#   vars:
+#     zia_secrets: "{{ lookup('community.hashi_vault.hashi_vault',
+#                       vault_zia_path,
+#                       url=vault_addr,
+#                       auth_method=vault_auth_method,
+#                       validate_certs=vault_validate_certs) }}"
+#
+# The lookup returns a dict with all keys from the Vault secret.
+# Access individual keys: zia_secrets['api_key'], zia_secrets['username']
+
+# ---------------------------------------------------------------------------
+# VAULT SECRET PATH TEMPLATES
+# ---------------------------------------------------------------------------
+# These templates define the structure of Vault paths used in this project.
+# The actual paths are constructed in the common role using these templates.
+#
+# Template variables:
+#   {{ env }}         — 'production' or 'staging'
+#   {{ tenant_name }} — ZIA tenant identifier (from inventory)
+
+# ZIA credentials path template
+# Actual path example: secret/zia/us_primary/credentials
+vault_zia_credentials_path_template: "secret/zia/{{ inventory_hostname | replace('zia_tenant_', '') }}/credentials"
+
+# Notification secrets path
+vault_notifications_path: "secret/notifications"
+
+# ---------------------------------------------------------------------------
+# VAULT RETRY SETTINGS
+# ---------------------------------------------------------------------------
+# Retry Vault lookups on transient failures (network blips, Vault restarts)
+vault_retry_count: 3
+vault_retry_delay: 2              # Seconds between retries
+
+# ---------------------------------------------------------------------------
+# VAULT TOKEN RENEWAL
+# ---------------------------------------------------------------------------
+# If using token auth, renew the token before it expires
+# Set to true if running long playbooks that might outlast token TTL
+vault_token_renew: false
+vault_token_renew_increment: 3600  # Renew for 1 hour
+
+# ---------------------------------------------------------------------------
+# FAIL-SAFE SETTINGS
+# ---------------------------------------------------------------------------
+# If Vault is unreachable, FAIL the playbook immediately.
+# NEVER fall back to plaintext credentials.
+# This is a critical security control.
+vault_fail_on_missing: true
+
+# Validate that all required secret keys are present after retrieval
+# This catches misconfigured Vault paths early
+vault_validate_required_keys: true
+
+# Required keys that must exist in the ZIA credentials secret
+vault_zia_required_keys:
+  - api_key
+  - username
+  - password

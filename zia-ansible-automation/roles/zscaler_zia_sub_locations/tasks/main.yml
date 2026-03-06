@@ -1,0 +1,74 @@
+# =============================================================================
+# roles/zscaler_zia_sub_locations/tasks/main.yml — Sub-Location Management
+# =============================================================================
+# PURPOSE:
+#   Manages ZIA sub-locations with parent dependency enforcement.
+#   Sub-locations MUST have a parent location that exists in ZIA.
+#
+# DEPENDENCY HANDLING STRATEGY:
+#   1. Load sub-location definitions
+#   2. For each sub-location, look up the parent location ID from ZIA API
+#   3. If parent doesn't exist: FAIL with clear error message
+#   4. If parent exists: proceed with create/update/delete
+#
+# ORDERING REQUIREMENT:
+#   This role MUST run AFTER zscaler_zia_locations role.
+#   Enforced in site.yml and onboard_locations.yml play ordering.
+# =============================================================================
+
+---
+- name: "SUB-LOCATIONS | Load sub-location definitions"
+  ansible.builtin.include_vars:
+    file: "{{ zia_sub_locations_file | default('vars/locations/sub_locations.yml') }}"
+  tags:
+    - always
+    - sub-locations
+
+- name: "SUB-LOCATIONS | Run validation"
+  ansible.builtin.include_tasks:
+    file: validate.yml
+  tags:
+    - always
+    - validate
+
+- name: "SUB-LOCATIONS | Process sub-locations with state=present"
+  ansible.builtin.include_tasks:
+    file: create.yml
+  loop: "{{ zia_sub_locations | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    loop_var: sub_location_item
+    label: "{{ sub_location_item.name }}"
+    pause: "{{ zia_api_rate_limit_delay }}"
+  tags:
+    - create
+    - sub-locations
+
+- name: "SUB-LOCATIONS | Process sub-locations with state=absent"
+  ansible.builtin.include_tasks:
+    file: delete.yml
+  loop: "{{ zia_sub_locations | selectattr('state', 'equalto', 'absent') | list }}"
+  loop_control:
+    loop_var: sub_location_item
+    label: "{{ sub_location_item.name }}"
+    pause: "{{ zia_api_rate_limit_delay }}"
+  when:
+    - zia_sub_locations | selectattr('state', 'equalto', 'absent') | list | length > 0
+    - force | bool or ansible_check_mode
+  tags:
+    - delete
+    - sub-locations
+
+- name: "SUB-LOCATIONS | Activate ZIA"
+  zscaler.ziacloud.zia_activation_status:
+    status: "ACTIVE"
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+  when:
+    - zia_auto_activate | default(true)
+    - not ansible_check_mode
+  no_log: true
+  tags:
+    - activate
+    - sub-locations

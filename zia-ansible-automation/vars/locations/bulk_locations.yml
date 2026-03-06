@@ -1,0 +1,701 @@
+# =============================================================================
+# vars/locations/bulk_locations.yml — Bulk Location Definitions
+# =============================================================================
+# PURPOSE:
+#   This is the primary data file defining all ZIA locations to be managed.
+#   It follows a data-driven approach where ALL location configuration is
+#   expressed as structured YAML data, not procedural code.
+#
+# WHY DATA-DRIVEN?
+#   - Adding a new location = adding a YAML block (no code changes)
+#   - Locations can be reviewed in pull requests as data changes
+#   - Bulk operations loop over this list automatically
+#   - Consistent structure enforced by validation role
+#   - Easy to generate from CMDB/IPAM exports (CSV → YAML conversion)
+#
+# SCALING TO 100+ LOCATIONS:
+#   This file can contain hundreds of location definitions.
+#   The location management role loops over 'zia_locations' list.
+#   Performance: ~1-2 seconds per location API call.
+#   For 100 locations: ~2-3 minutes total runtime.
+#   For 500 locations: ~10-15 minutes (consider splitting into batches).
+#
+# FIELD REFERENCE:
+#   name          (required) — Unique location name. Must match naming convention.
+#   state         (required) — 'present' to create/update, 'absent' to delete
+#   ip_addresses  (required) — List of egress IP addresses for this location
+#   country       (required) — ISO 3166-1 alpha-2 country code
+#   tz            (required) — IANA timezone string
+#   profile       (optional) — CORPORATE, SERVER, GUESTWIFI, IOT, WORKLOAD
+#   auth_required (optional) — Require user authentication (default: true)
+#   ssl_scan_enabled (optional) — Enable SSL inspection (default: false)
+#   surrogate_ip  (optional) — Enable surrogate IP (default: false)
+#   xff_forward_enabled (optional) — Enable XFF forwarding (default: false)
+#   up_bandwidth  (optional) — Upload bandwidth limit in Mbps (0=unlimited)
+#   dn_bandwidth  (optional) — Download bandwidth limit in Mbps (0=unlimited)
+#   description   (optional) — Human-readable description
+#   vpn_credentials (optional) — VPN credential references for GRE/IPSec
+#   sub_locations (optional) — List of sub-locations for this location
+#
+# GENERATING FROM CMDB:
+#   Use the provided script to convert CSV exports to this format:
+#   python3 scripts/csv_to_locations.py --input locations.csv --output vars/locations/bulk_locations.yml
+#
+# USAGE:
+#   ansible-playbook onboard_locations.yml
+#   ansible-playbook onboard_locations.yml --tags create
+#   ansible-playbook onboard_locations.yml --check --diff  # dry-run
+#
+# EXAMPLE EXECUTION COMMANDS:
+#   # Onboard all locations:
+#   ansible-playbook -i inventories/production onboard_locations.yml
+#
+#   # Onboard only locations tagged 'us-east':
+#   ansible-playbook -i inventories/production onboard_locations.yml \
+#     --extra-vars "location_filter_tag=us-east"
+#
+#   # Dry-run to see what would change:
+#   ansible-playbook -i inventories/production onboard_locations.yml \
+#     --check --diff
+#
+#   # Delete a specific location (requires force=true):
+#   ansible-playbook -i inventories/production onboard_locations.yml \
+#     --extra-vars "force=true" --tags delete \
+#     --extra-vars "target_location=NYC-HQ-01"
+# =============================================================================
+
+---
+# =============================================================================
+# ZIA LOCATIONS — COMPLETE DEFINITION LIST
+# =============================================================================
+# Each entry in this list represents one ZIA location.
+# The location management role iterates over this list.
+#
+# IDEMPOTENCY NOTE:
+#   The ZIA Ansible collection modules are idempotent by design.
+#   Running this playbook multiple times will NOT create duplicate locations.
+#   If a location already exists with the same name, it will be UPDATED
+#   to match the definition below (if any fields differ).
+# =============================================================================
+
+zia_locations:
+
+  # ===========================================================================
+  # UNITED STATES — EAST COAST
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # New York — Headquarters
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01"
+    state: present
+    description: "New York City Headquarters - Primary Office"
+    country: "UNITED_STATES"
+    tz: "US/Eastern"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true          # HQ has SSL inspection enabled
+    surrogate_ip: true              # Surrogate IP for user identity mapping
+    xff_forward_enabled: false
+    up_bandwidth: 0                 # Unlimited (HQ has dedicated fiber)
+    dn_bandwidth: 0
+    # Egress IP addresses for this location
+    # These are the public IPs that ZIA will associate with this location
+    ip_addresses:
+      - "203.0.113.10"             # Primary egress IP (RFC 5737 example)
+      - "203.0.113.11"             # Secondary egress IP (failover)
+    # VPN credentials reference (for GRE tunnel authentication)
+    # The actual credentials are stored in Vault
+    # vpn_credentials:
+    #   - id: "{{ zia_vpn_cred_nyc_hq_01 }}"
+    tags:
+      - us-east
+      - headquarters
+      - ssl-inspection
+
+  # ---------------------------------------------------------------------------
+  # New York — Data Center
+  # ---------------------------------------------------------------------------
+  - name: "NYC-DC-01"
+    state: present
+    description: "New York Data Center - Primary DC"
+    country: "UNITED_STATES"
+    tz: "US/Eastern"
+    profile: "SERVER"              # Server profile for data center
+    auth_required: false           # No user auth for server traffic
+    ssl_scan_enabled: false        # No SSL inspection for server-to-server
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.20"
+      - "203.0.113.21"
+    tags:
+      - us-east
+      - datacenter
+
+  # ---------------------------------------------------------------------------
+  # Boston — Branch Office
+  # ---------------------------------------------------------------------------
+  - name: "BOS-BRANCH-01"
+    state: present
+    description: "Boston Branch Office - Financial District"
+    country: "UNITED_STATES"
+    tz: "US/Eastern"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 100              # 100 Mbps upload limit
+    dn_bandwidth: 500              # 500 Mbps download limit
+    ip_addresses:
+      - "203.0.113.30"
+    tags:
+      - us-east
+      - branch
+
+  # ---------------------------------------------------------------------------
+  # Washington DC — Government Affairs Office
+  # ---------------------------------------------------------------------------
+  - name: "WDC-OFFICE-01"
+    state: present
+    description: "Washington DC Government Affairs Office"
+    country: "UNITED_STATES"
+    tz: "US/Eastern"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.40"
+    tags:
+      - us-east
+      - branch
+      - government
+
+  # ---------------------------------------------------------------------------
+  # Atlanta — Regional Office
+  # ---------------------------------------------------------------------------
+  - name: "ATL-OFFICE-01"
+    state: present
+    description: "Atlanta Regional Office"
+    country: "UNITED_STATES"
+    tz: "US/Eastern"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 200
+    dn_bandwidth: 500
+    ip_addresses:
+      - "203.0.113.50"
+    tags:
+      - us-east
+      - branch
+
+  # ===========================================================================
+  # UNITED STATES — CENTRAL
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Chicago — Midwest Hub
+  # ---------------------------------------------------------------------------
+  - name: "CHI-HUB-01"
+    state: present
+    description: "Chicago Midwest Hub Office"
+    country: "UNITED_STATES"
+    tz: "US/Central"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.60"
+      - "203.0.113.61"
+    tags:
+      - us-central
+      - hub
+
+  # ---------------------------------------------------------------------------
+  # Dallas — Operations Center
+  # ---------------------------------------------------------------------------
+  - name: "DAL-OPS-01"
+    state: present
+    description: "Dallas Operations Center"
+    country: "UNITED_STATES"
+    tz: "US/Central"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.70"
+    tags:
+      - us-central
+      - operations
+
+  # ---------------------------------------------------------------------------
+  # Houston — Energy Sector Office
+  # ---------------------------------------------------------------------------
+  - name: "HOU-OFFICE-01"
+    state: present
+    description: "Houston Energy Sector Office"
+    country: "UNITED_STATES"
+    tz: "US/Central"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 200
+    dn_bandwidth: 500
+    ip_addresses:
+      - "203.0.113.80"
+    tags:
+      - us-central
+      - branch
+
+  # ---------------------------------------------------------------------------
+  # Minneapolis — Branch Office
+  # ---------------------------------------------------------------------------
+  - name: "MSP-BRANCH-01"
+    state: present
+    description: "Minneapolis Branch Office"
+    country: "UNITED_STATES"
+    tz: "US/Central"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 100
+    dn_bandwidth: 200
+    ip_addresses:
+      - "203.0.113.90"
+    tags:
+      - us-central
+      - branch
+
+  # ===========================================================================
+  # UNITED STATES — WEST COAST
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Los Angeles — West Coast HQ
+  # ---------------------------------------------------------------------------
+  - name: "LAX-HQ-01"
+    state: present
+    description: "Los Angeles West Coast Headquarters"
+    country: "UNITED_STATES"
+    tz: "US/Pacific"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.100"
+      - "203.0.113.101"
+    tags:
+      - us-west
+      - headquarters
+
+  # ---------------------------------------------------------------------------
+  # San Francisco — Tech Hub
+  # ---------------------------------------------------------------------------
+  - name: "SFO-TECH-01"
+    state: present
+    description: "San Francisco Technology Hub"
+    country: "UNITED_STATES"
+    tz: "US/Pacific"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.110"
+    tags:
+      - us-west
+      - tech-hub
+
+  # ---------------------------------------------------------------------------
+  # Seattle — Engineering Office
+  # ---------------------------------------------------------------------------
+  - name: "SEA-ENG-01"
+    state: present
+    description: "Seattle Engineering Office"
+    country: "UNITED_STATES"
+    tz: "US/Pacific"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "203.0.113.120"
+    tags:
+      - us-west
+      - engineering
+
+  # ---------------------------------------------------------------------------
+  # Denver — Mountain Region Office
+  # ---------------------------------------------------------------------------
+  - name: "DEN-OFFICE-01"
+    state: present
+    description: "Denver Mountain Region Office"
+    country: "UNITED_STATES"
+    tz: "US/Mountain"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 100
+    dn_bandwidth: 300
+    ip_addresses:
+      - "203.0.113.130"
+    tags:
+      - us-mountain
+      - branch
+
+  # ---------------------------------------------------------------------------
+  # Phoenix — Southwest Office
+  # ---------------------------------------------------------------------------
+  - name: "PHX-OFFICE-01"
+    state: present
+    description: "Phoenix Southwest Office"
+    country: "UNITED_STATES"
+    tz: "US/Arizona"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 100
+    dn_bandwidth: 300
+    ip_addresses:
+      - "203.0.113.140"
+    tags:
+      - us-mountain
+      - branch
+
+  # ===========================================================================
+  # EUROPE
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # London — EMEA Headquarters
+  # ---------------------------------------------------------------------------
+  - name: "LON-HQ-01"
+    state: present
+    description: "London EMEA Headquarters"
+    country: "UNITED_KINGDOM"
+    tz: "Europe/London"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "198.51.100.10"            # RFC 5737 example IPs for EU
+      - "198.51.100.11"
+    tags:
+      - emea
+      - headquarters
+      - gdpr
+
+  # ---------------------------------------------------------------------------
+  # Frankfurt — European Data Center
+  # ---------------------------------------------------------------------------
+  - name: "FRA-DC-01"
+    state: present
+    description: "Frankfurt European Data Center"
+    country: "GERMANY"
+    tz: "Europe/Berlin"
+    profile: "SERVER"
+    auth_required: false
+    ssl_scan_enabled: false
+    surrogate_ip: false
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "198.51.100.20"
+      - "198.51.100.21"
+    tags:
+      - emea
+      - datacenter
+      - gdpr
+
+  # ---------------------------------------------------------------------------
+  # Paris — France Office
+  # ---------------------------------------------------------------------------
+  - name: "PAR-OFFICE-01"
+    state: present
+    description: "Paris France Office"
+    country: "FRANCE"
+    tz: "Europe/Paris"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 200
+    dn_bandwidth: 500
+    ip_addresses:
+      - "198.51.100.30"
+    tags:
+      - emea
+      - branch
+      - gdpr
+
+  # ---------------------------------------------------------------------------
+  # Amsterdam — Netherlands Office
+  # ---------------------------------------------------------------------------
+  - name: "AMS-OFFICE-01"
+    state: present
+    description: "Amsterdam Netherlands Office"
+    country: "NETHERLANDS"
+    tz: "Europe/Amsterdam"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 200
+    dn_bandwidth: 500
+    ip_addresses:
+      - "198.51.100.40"
+    tags:
+      - emea
+      - branch
+      - gdpr
+
+  # ---------------------------------------------------------------------------
+  # Stockholm — Nordic Office
+  # ---------------------------------------------------------------------------
+  - name: "STO-OFFICE-01"
+    state: present
+    description: "Stockholm Nordic Office"
+    country: "SWEDEN"
+    tz: "Europe/Stockholm"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 100
+    dn_bandwidth: 300
+    ip_addresses:
+      - "198.51.100.50"
+    tags:
+      - emea
+      - branch
+      - gdpr
+
+  # ---------------------------------------------------------------------------
+  # Zurich — Switzerland Office
+  # ---------------------------------------------------------------------------
+  - name: "ZRH-OFFICE-01"
+    state: present
+    description: "Zurich Switzerland Office - Financial Services"
+    country: "SWITZERLAND"
+    tz: "Europe/Zurich"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true         # Financial services require SSL inspection
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "198.51.100.60"
+    tags:
+      - emea
+      - branch
+      - financial
+
+  # ===========================================================================
+  # ASIA PACIFIC
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Singapore — APAC Headquarters
+  # ---------------------------------------------------------------------------
+  - name: "SIN-HQ-01"
+    state: present
+    description: "Singapore APAC Headquarters"
+    country: "SINGAPORE"
+    tz: "Asia/Singapore"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "192.0.2.10"               # RFC 5737 example IPs for APAC
+      - "192.0.2.11"
+    tags:
+      - apac
+      - headquarters
+
+  # ---------------------------------------------------------------------------
+  # Tokyo — Japan Office
+  # ---------------------------------------------------------------------------
+  - name: "TYO-OFFICE-01"
+    state: present
+    description: "Tokyo Japan Office"
+    country: "JAPAN"
+    tz: "Asia/Tokyo"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "192.0.2.20"
+    tags:
+      - apac
+      - branch
+
+  # ---------------------------------------------------------------------------
+  # Sydney — Australia Office
+  # ---------------------------------------------------------------------------
+  - name: "SYD-OFFICE-01"
+    state: present
+    description: "Sydney Australia Office"
+    country: "AUSTRALIA"
+    tz: "Australia/Sydney"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 200
+    dn_bandwidth: 500
+    ip_addresses:
+      - "192.0.2.30"
+    tags:
+      - apac
+      - branch
+
+  # ---------------------------------------------------------------------------
+  # Hong Kong — Financial Hub
+  # ---------------------------------------------------------------------------
+  - name: "HKG-OFFICE-01"
+    state: present
+    description: "Hong Kong Financial Hub"
+    country: "HONG_KONG"
+    tz: "Asia/Hong_Kong"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: true
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 0
+    dn_bandwidth: 0
+    ip_addresses:
+      - "192.0.2.40"
+    tags:
+      - apac
+      - branch
+      - financial
+
+  # ---------------------------------------------------------------------------
+  # Mumbai — India Office
+  # ---------------------------------------------------------------------------
+  - name: "BOM-OFFICE-01"
+    state: present
+    description: "Mumbai India Office"
+    country: "INDIA"
+    tz: "Asia/Kolkata"
+    profile: "CORPORATE"
+    auth_required: true
+    ssl_scan_enabled: false
+    surrogate_ip: true
+    xff_forward_enabled: false
+    up_bandwidth: 100
+    dn_bandwidth: 300
+    ip_addresses:
+      - "192.0.2.50"
+    tags:
+      - apac
+      - branch
+
+  # ===========================================================================
+  # EXAMPLE: LOCATION PENDING DELETION (state: absent)
+  # ===========================================================================
+  # This location will be DELETED when the playbook runs.
+  # The deletion role includes safety checks:
+  #   1. Confirms location exists before attempting deletion
+  #   2. Checks for active sub-locations (blocks deletion if found)
+  #   3. Requires force=true flag for production deletion
+  #   4. Logs deletion to audit log
+  #   5. Sends notification before deletion
+  #
+  # SOFT-DELETE FLOW:
+  #   1. Location is first DISABLED (state: disabled in ZIA)
+  #   2. After soft_delete_grace_hours, location is permanently deleted
+  #   3. This provides a recovery window for accidental deletions
+  #
+  # To actually delete, run:
+  #   ansible-playbook onboard_locations.yml --extra-vars "force=true" --tags delete
+
+  # - name: "OLD-OFFICE-01"
+  #   state: absent
+  #   description: "Old office being decommissioned"
+  #   # Note: ip_addresses still required for validation even on deletion
+  #   ip_addresses:
+  #     - "203.0.113.200"
+  #   country: "UNITED_STATES"
+  #   tz: "US/Eastern"
+
+# =============================================================================
+# ADDITIONAL LOCATIONS (Template for expansion to 100+)
+# =============================================================================
+# To add more locations, copy the template below and fill in the values.
+# The automation will handle the rest.
+#
+# TEMPLATE:
+#   - name: "XXX-TYPE-NN"          # e.g., "MIA-BRANCH-01"
+#     state: present
+#     description: "City Name Office Type"
+#     country: "COUNTRY_NAME"      # ZIA country name (not ISO code)
+#     tz: "Region/City"            # IANA timezone
+#     profile: "CORPORATE"
+#     auth_required: true
+#     ssl_scan_enabled: false
+#     surrogate_ip: true
+#     xff_forward_enabled: false
+#     up_bandwidth: 0
+#     dn_bandwidth: 0
+#     ip_addresses:
+#       - "x.x.x.x"
+#     tags:
+#       - region
+#       - type

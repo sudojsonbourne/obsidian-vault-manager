@@ -1,0 +1,158 @@
+# =============================================================================
+# requirements.yml — Ansible Galaxy Collection & Role Requirements
+# =============================================================================
+# PURPOSE:
+#   Declares all external Ansible collections and roles required by this
+#   ZIA automation framework. This file is the single source of truth for
+#   dependency management.
+#
+# INSTALLATION:
+#   Install all collections:
+#     ansible-galaxy collection install -r requirements.yml
+#
+#   Install to a specific path (useful for CI/CD):
+#     ansible-galaxy collection install -r requirements.yml -p ./collections
+#
+#   Force reinstall (upgrade to latest):
+#     ansible-galaxy collection install -r requirements.yml --force
+#
+# VERSION PINNING STRATEGY:
+#   All collections are pinned to specific versions to ensure reproducible
+#   builds. In a Fortune 500 environment, unpinned dependencies are a
+#   change management risk. Update versions deliberately after testing.
+#
+# CI/CD INTEGRATION:
+#   This file should be used in your pipeline's dependency installation step:
+#     - name: Install Ansible Collections
+#       run: ansible-galaxy collection install -r requirements.yml
+#
+# COLLECTIONS OVERVIEW:
+#   1. zscaler.ziacloud     — Official Zscaler ZIA Ansible collection
+#                             Provides all ZIA resource modules (locations,
+#                             sub-locations, GRE tunnels, URL filtering, etc.)
+#
+#   2. community.hashi_vault — HashiCorp Vault lookup plugin and modules
+#                              Used for dynamic credential retrieval.
+#                              CRITICAL: No credentials stored in plaintext.
+#
+#   3. community.general    — General-purpose Ansible modules
+#                             Provides: uri, json_query, mail, slack, etc.
+#                             Used for HTTP validation, notifications, logging.
+#
+#   4. ansible.utils        — Network utility modules and filters
+#                             Provides: ipaddr filter, validate module,
+#                             network address manipulation for GRE tunnel validation.
+#
+#   5. ansible.posix        — POSIX-compliant system modules
+#                             Used for file operations, synchronize, etc.
+#                             Needed for log file management on control node.
+# =============================================================================
+
+---
+collections:
+  # ---------------------------------------------------------------------------
+  # ZSCALER ZIA COLLECTION
+  # ---------------------------------------------------------------------------
+  # The official Zscaler ZIA Ansible collection.
+  # Source: https://galaxy.ansible.com/zscaler/ziacloud
+  # GitHub: https://github.com/zscaler/zscaler-ansible
+  #
+  # Provides modules for:
+  #   - zia_location_management         (locations)
+  #   - zia_location_management_sublocations (sub-locations)
+  #   - zia_traffic_forwarding_gre_tunnels   (GRE tunnels)
+  #   - zia_url_filtering_rules          (URL filtering / domain blocking)
+  #   - zia_url_categories               (URL categories)
+  #   - zia_firewall_filtering_rules     (firewall rules)
+  #   - zia_admin_users                  (admin management)
+  #
+  # IMPORTANT: Requires Python package 'zscaler-sdk-python' on control node.
+  # Install: pip install zscaler-sdk-python
+  - name: zscaler.ziacloud
+    version: ">=1.0.0"
+    # Pin to a specific version in production after validation:
+    # version: "1.2.0"
+    source: https://galaxy.ansible.com
+
+  # ---------------------------------------------------------------------------
+  # HASHICORP VAULT COLLECTION
+  # ---------------------------------------------------------------------------
+  # Provides the hashi_vault lookup plugin for dynamic secret retrieval.
+  # Source: https://galaxy.ansible.com/community/hashi_vault
+  #
+  # Provides:
+  #   - lookup('community.hashi_vault.hashi_vault', ...)
+  #   - community.hashi_vault.vault_read (module)
+  #   - community.hashi_vault.vault_write (module)
+  #   - community.hashi_vault.vault_token_create (module)
+  #
+  # PREREQUISITES on control node:
+  #   pip install hvac                    # HashiCorp Vault Python client
+  #   pip install requests                # HTTP library
+  #
+  # ENVIRONMENT VARIABLES used by this collection:
+  #   VAULT_ADDR    — Vault server URL (e.g., https://vault.corp.example.com:8200)
+  #   VAULT_TOKEN   — Vault authentication token
+  #   VAULT_ROLE_ID — AppRole role ID (for AppRole auth)
+  #   VAULT_SECRET_ID — AppRole secret ID (for AppRole auth)
+  - name: community.hashi_vault
+    version: ">=6.0.0"
+    source: https://galaxy.ansible.com
+
+  # ---------------------------------------------------------------------------
+  # COMMUNITY GENERAL COLLECTION
+  # ---------------------------------------------------------------------------
+  # Large collection of general-purpose modules.
+  # Source: https://galaxy.ansible.com/community/general
+  #
+  # Used in this project for:
+  #   - community.general.json_query    — JMESPath queries on API responses
+  #   - community.general.mail          — Email notifications on failures
+  #   - community.general.slack         — Slack notifications for change events
+  #   - community.general.ini_file      — Config file management
+  #   - community.general.make          — Makefile integration
+  - name: community.general
+    version: ">=8.0.0"
+    source: https://galaxy.ansible.com
+
+  # ---------------------------------------------------------------------------
+  # ANSIBLE UTILS COLLECTION
+  # ---------------------------------------------------------------------------
+  # Network utility modules and Jinja2 filters.
+  # Source: https://galaxy.ansible.com/ansible/utils
+  #
+  # Used in this project for:
+  #   - ansible.utils.ipaddr            — IP address validation and manipulation
+  #                                       Critical for GRE tunnel IP validation
+  #   - ansible.utils.validate          — Schema-based data validation
+  #   - ansible.utils.fact_diff         — Structured diff output
+  #
+  # PREREQUISITES:
+  #   pip install netaddr               # Required for ipaddr filter
+  #   pip install jsonschema            # Required for validate module
+  - name: ansible.utils
+    version: ">=3.0.0"
+    source: https://galaxy.ansible.com
+
+  # ---------------------------------------------------------------------------
+  # ANSIBLE POSIX COLLECTION
+  # ---------------------------------------------------------------------------
+  # POSIX-compliant system modules for control node operations.
+  # Source: https://galaxy.ansible.com/ansible/posix
+  #
+  # Used in this project for:
+  #   - ansible.posix.synchronize      — File synchronization
+  #   - ansible.posix.sysctl           — System parameter management
+  - name: ansible.posix
+    version: ">=1.5.0"
+    source: https://galaxy.ansible.com
+
+# ---------------------------------------------------------------------------
+# ROLES (External)
+# ---------------------------------------------------------------------------
+# No external roles are required. All roles are maintained internally
+# within the roles/ directory of this project. This is intentional:
+# external role dependencies introduce supply chain risk in enterprise
+# environments. All logic is self-contained and auditable.
+#
+# roles: []

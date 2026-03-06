@@ -1,0 +1,106 @@
+# =============================================================================
+# roles/zscaler_zia_locations/defaults/main.yml — Location Role Defaults
+# =============================================================================
+# PURPOSE:
+#   Default variable values for the ZIA location management role.
+#   These defaults implement safe, conservative behavior by default.
+#   Operators must explicitly override to enable destructive operations.
+#
+# DESIGN PRINCIPLE — SAFE BY DEFAULT:
+#   Every default here is chosen to be the SAFEST possible option.
+#   Destructive operations (delete, force) default to disabled.
+#   This prevents accidental production impact from misconfiguration.
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# OPERATION DEFAULTS
+# ---------------------------------------------------------------------------
+
+# Default state for locations (present = create/update)
+# Override per-location in vars/locations/bulk_locations.yml
+location_default_state: "present"
+
+# Force flag — required for deletion in production
+# Must be explicitly set to true: --extra-vars "force=true"
+force: false
+
+# Dry-run mode — additional validation without changes
+# Separate from --check mode; adds extra pre-flight checks
+dry_run: false
+
+# ---------------------------------------------------------------------------
+# SAFETY DEFAULTS
+# ---------------------------------------------------------------------------
+
+# Require explicit confirmation before deletion
+require_confirmation: true
+
+# Maximum locations that can be deleted in a single run
+# Prevents accidental mass deletion
+max_bulk_delete: 5
+
+# Soft-delete: disable before delete (provides recovery window)
+soft_delete_enabled: true
+
+# Hours between soft-disable and hard-delete
+soft_delete_grace_hours: 24
+
+# Validate location name against naming convention
+validate_location_names: true
+
+# Validate IP addresses are valid public IPs
+validate_ip_addresses: true
+
+# Block deletion if sub-locations exist
+block_delete_with_sublocs: true
+
+# ---------------------------------------------------------------------------
+# ZIA API DEFAULTS
+# ---------------------------------------------------------------------------
+
+# Automatically activate ZIA after changes
+zia_auto_activate: true
+
+# Seconds to wait for activation to complete
+zia_activation_timeout: 300
+
+# Delay between API calls (rate limiting)
+zia_api_rate_limit_delay: 1
+
+# Max retries on API failure
+zia_api_max_retries: 3
+
+# Delay between retries
+zia_api_retry_delay: 5
+
+# ---------------------------------------------------------------------------
+# LOCATION ATTRIBUTE DEFAULTS
+# ---------------------------------------------------------------------------
+# These defaults are merged with per-location definitions.
+# Per-location values take precedence over these defaults.
+
+location_attr_defaults:
+  profile: "CORPORATE"
+  auth_required: true
+  ssl_scan_enabled: false
+  surrogate_ip: false
+  xff_forward_enabled: false
+  up_bandwidth: 0
+  dn_bandwidth: 0
+  zapp_ssl_scan_enabled: false
+  surrogate_ip_enforced_for_known_browsers: false
+  idle_time_in_minutes: 0
+  display_time_unit: "HOUR"
+
+# ---------------------------------------------------------------------------
+# FILTER DEFAULTS
+# ---------------------------------------------------------------------------
+
+# Filter locations by tag (empty = process all)
+# Override: --extra-vars "location_filter_tag=us-east"
+location_filter_tag: ""
+
+# Target a specific location by name (empty = process all)
+# Override: --extra-vars "target_location=NYC-HQ-01"
+target_location: ""

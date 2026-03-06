@@ -1,0 +1,84 @@
+# =============================================================================
+# teardown_locations.yml — Safe Location Teardown Playbook
+# =============================================================================
+# PURPOSE:
+#   Safely removes ZIA locations, sub-locations, and GRE tunnels.
+#   Has the MOST safety guards of any playbook in this framework.
+#
+# SAFETY REQUIREMENTS:
+#   1. --extra-vars "force=true" MUST be set
+#   2. --check mode is STRONGLY recommended before live run
+#   3. Change ticket required in production (if change_management_enabled=true)
+#   4. Deletion count limited by max_bulk_delete (default: 5)
+#
+# TEARDOWN ORDER (reverse of onboarding):
+#   1. GRE Tunnels first (remove network connectivity)
+#   2. Sub-locations second (remove child resources)
+#   3. Locations last (remove parent resources)
+#
+# USAGE:
+#   # ALWAYS run check mode first:
+#   ansible-playbook -i inventories/production teardown_locations.yml \
+#     --check --diff --extra-vars "force=true"
+#
+#   # Live teardown (requires force=true):
+#   ansible-playbook -i inventories/production teardown_locations.yml \
+#     --extra-vars "force=true change_ticket=CHG0001234"
+#
+#   # Teardown single location:
+#   ansible-playbook -i inventories/production teardown_locations.yml \
+#     --extra-vars "force=true target_location=NYC-HQ-01"
+# =============================================================================
+
+---
+- name: "ZIA Location Teardown — DESTRUCTIVE OPERATION"
+  hosts: zia_tenants
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: "TEARDOWN | Print teardown warning banner"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║         ⚠️  ZIA LOCATION TEARDOWN — DESTRUCTIVE OPERATION ⚠️         ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+
+          This playbook will PERMANENTLY DELETE ZIA locations.
+          This action CANNOT be undone without re-running onboard_locations.yml.
+
+          Environment: {{ env | default('NOT SET') }}
+          Tenant:      {{ inventory_hostname }}
+          Force flag:  {{ force | default(false) }}
+          Check mode:  {{ ansible_check_mode }}
+
+          ⚠️  If force=false, deletion will be BLOCKED.
+          ⚠️  Run with --check first to preview what will be deleted.
+          ══════════════════════════════════════════════════════════════════════
+      tags:
+        - always
+
+    - name: "TEARDOWN | Require force=true for live teardown"
+      ansible.builtin.assert:
+        that:
+          - force | default(false) | bool
+        fail_msg: |
+          ❌ TEARDOWN BLOCKED: force=true is required!
+
+          This is a safety gate to prevent accidental teardown.
+          To proceed: --extra-vars "force=true"
+        success_msg: "✅ Force flag confirmed — teardown authorized"
+      when: not ansible_check_mode
+      tags:
+        - always
+
+  roles:
+    - role: common
+      tags: [always]
+    # Teardown order: GRE → Sub-locations → Locations (reverse of onboarding)
+    - role: zscaler_zia_gre_tunnels
+      tags: [gre]
+    - role: zscaler_zia_sub_locations
+      tags: [sub-locations]
+    - role: zscaler_zia_locations
+      tags: [locations]

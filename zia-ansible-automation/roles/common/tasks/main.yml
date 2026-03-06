@@ -1,0 +1,82 @@
+# =============================================================================
+# roles/common/tasks/main.yml — Common Role Entry Point
+# =============================================================================
+# PURPOSE:
+#   Entry point for the common role. Orchestrates the execution of shared
+#   tasks that all other roles depend on.
+#
+# EXECUTION ORDER:
+#   1. vault_auth.yml    — Retrieve credentials from HashiCorp Vault
+#   2. preflight_summary.yml — Print pre-flight summary
+#   3. logging.yml       — Initialize structured logging
+#
+# WHY A COMMON ROLE?
+#   Rather than duplicating vault auth and preflight logic in every role,
+#   the common role provides a single, tested, auditable implementation.
+#   This follows the DRY (Don't Repeat Yourself) principle and ensures
+#   consistent behavior across all roles.
+#
+# HOW OTHER ROLES USE THIS:
+#   Other roles include common tasks via include_role or dependencies:
+#
+#   Option 1 — Role dependency (in meta/main.yml):
+#     dependencies:
+#       - role: common
+#
+#   Option 2 — Include specific tasks:
+#     - name: Retrieve credentials
+#       ansible.builtin.include_tasks:
+#         file: "{{ role_path }}/../common/tasks/vault_auth.yml"
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# STEP 1: VAULT AUTHENTICATION
+# ---------------------------------------------------------------------------
+# Always retrieve credentials first. No other tasks should run without
+# valid credentials. This is enforced by the task ordering here.
+
+- name: "COMMON | Include Vault authentication tasks"
+  ansible.builtin.include_tasks:
+    file: vault_auth.yml
+    # Apply 'vault' tag to all tasks in this file
+    apply:
+      tags:
+        - vault
+        - always
+  tags:
+    - always
+    - vault
+
+# ---------------------------------------------------------------------------
+# STEP 2: PRE-FLIGHT SUMMARY
+# ---------------------------------------------------------------------------
+# Print the pre-flight summary after credentials are retrieved
+# (so we can show the masked username in the summary).
+
+- name: "COMMON | Include pre-flight summary tasks"
+  ansible.builtin.include_tasks:
+    file: preflight_summary.yml
+    apply:
+      tags:
+        - preflight
+        - always
+  when: preflight_summary_enabled | default(true)
+  tags:
+    - always
+    - preflight
+
+# ---------------------------------------------------------------------------
+# STEP 3: LOGGING INITIALIZATION
+# ---------------------------------------------------------------------------
+
+- name: "COMMON | Include logging initialization tasks"
+  ansible.builtin.include_tasks:
+    file: logging.yml
+    apply:
+      tags:
+        - logging
+        - always
+  tags:
+    - always
+    - logging

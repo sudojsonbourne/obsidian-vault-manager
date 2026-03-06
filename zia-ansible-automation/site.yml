@@ -1,0 +1,152 @@
+# =============================================================================
+# site.yml — Master Playbook: Full ZIA Infrastructure Deployment
+# =============================================================================
+# PURPOSE:
+#   The master playbook that orchestrates the complete ZIA automation stack.
+#   Runs all roles in the correct dependency order across all tenants.
+#
+# EXECUTION ORDER:
+#   Play 1: Locations     — Create/update all ZIA locations
+#   Play 2: Sub-Locations — Create/update sub-locations (after locations exist)
+#   Play 3: GRE Tunnels   — Configure GRE tunnels for each location
+#   Play 4: Domain Block  — Apply malicious domain blocking policies
+#
+# WHY SEPARATE PLAYS (not tasks in one play)?
+#   Separate plays allow:
+#   - Independent failure handling per resource type
+#   - Selective execution: --tags locations (skip sub-locations, GRE, domains)
+#   - Clear separation of concerns in output
+#   - Different hosts/inventory groups per resource type (future)
+#
+# USAGE EXAMPLES:
+#   # Full deployment (production):
+#   ansible-playbook -i inventories/production site.yml
+#
+#   # Dry run (check mode — no changes):
+#   ansible-playbook -i inventories/production site.yml --check --diff
+#
+#   # Only locations:
+#   ansible-playbook -i inventories/production site.yml --tags locations
+#
+#   # Only GRE tunnels:
+#   ansible-playbook -i inventories/production site.yml --tags gre
+#
+#   # Staging environment:
+#   ansible-playbook -i inventories/staging site.yml
+#
+#   # Single tenant:
+#   ansible-playbook -i inventories/production site.yml --limit zia_tenant_us_primary
+#
+#   # With change ticket (change management):
+#   ansible-playbook -i inventories/production site.yml \
+#     --extra-vars "change_ticket=CHG0001234"
+#
+# ROLLBACK STRATEGY:
+#   ZIA does not have a native rollback mechanism.
+#   To rollback:
+#   1. Change state=absent for resources to remove
+#   2. Run with --extra-vars "force=true"
+#   3. Or restore from the last known-good vars file in git
+#
+# TROUBLESHOOTING:
+#   - Run with -vvv for verbose output
+#   - Run with --check first to preview changes
+#   - Check logs: /var/log/ansible/zia-automation.log
+#   - Check audit log: /var/log/ansible/zia-audit.log
+# =============================================================================
+
+---
+# =============================================================================
+# PLAY 1: ZIA LOCATION MANAGEMENT
+# =============================================================================
+# Creates, updates, or deletes ZIA locations.
+# This MUST run before sub-locations and GRE tunnels.
+
+- name: "ZIA Location Management"
+  # Target all ZIA tenant hosts defined in the inventory
+  hosts: zia_tenants
+  # Gather facts for timezone, date/time info used in logging
+  gather_facts: true
+  # Run one tenant at a time (serial=1) to avoid API rate limit issues
+  # Increase to 2-3 for faster execution if rate limits allow
+  serial: 1
+
+  # Pre-tasks run before roles — used for environment validation
+  pre_tasks:
+    - name: "SITE | Validate environment is set"
+      ansible.builtin.assert:
+        that:
+          - env is defined
+          - env in ['production', 'staging', 'development']
+        fail_msg: |
+          ❌ 'env' variable is not set or invalid!
+          Set via inventory group_vars or --extra-vars "env=production"
+        success_msg: "✅ Environment: {{ env }}"
+      tags:
+        - always
+
+  roles:
+    # The common role runs first (Vault auth, preflight, logging)
+    # It's also a dependency in each role's meta/main.yml,
+    # but listing it explicitly here makes the order crystal clear.
+    - role: common
+      tags:
+        - always
+        - common
+
+    # Location management role
+    - role: zscaler_zia_locations
+      tags:
+        - locations
+
+  # Post-tasks run after all roles complete
+  post_tasks:
+    - name: "SITE | Location play complete"
+      ansible.builtin.debug:
+        msg: "✅ Location management play complete for {{ inventory_hostname }}"
+      tags:
+        - always
+
+# =============================================================================
+# PLAY 2: ZIA SUB-LOCATION MANAGEMENT
+# =============================================================================
+# MUST run after Play 1 — sub-locations require parent locations to exist.
+
+- name: "ZIA Sub-Location Management"
+  hosts: zia_tenants
+  gather_facts: false
+  serial: 1
+
+  roles:
+    - role: zscaler_zia_sub_locations
+      tags:
+        - sub-locations
+
+# =============================================================================
+# PLAY 3: ZIA GRE TUNNEL MANAGEMENT
+# =============================================================================
+
+- name: "ZIA GRE Tunnel Management"
+  hosts: zia_tenants
+  gather_facts: false
+  serial: 1
+
+  roles:
+    - role: zscaler_zia_gre_tunnels
+      tags:
+        - gre
+
+# =============================================================================
+# PLAY 4: ZIA DOMAIN BLOCKING
+# =============================================================================
+
+- name: "ZIA Malicious Domain Blocking"
+  hosts: zia_tenants
+  gather_facts: false
+  serial: 1
+
+  roles:
+    - role: zscaler_zia_domain_blocking
+      tags:
+        - domains
+        - security

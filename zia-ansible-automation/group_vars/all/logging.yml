@@ -1,0 +1,122 @@
+# =============================================================================
+# group_vars/all/logging.yml — Logging & Audit Configuration
+# =============================================================================
+# PURPOSE:
+#   Defines the logging strategy for the ZIA automation framework.
+#   Proper logging is critical for:
+#   - Security audit trails (who changed what, when)
+#   - Troubleshooting failed automation runs
+#   - Compliance reporting (SOC2, ISO27001, PCI-DSS)
+#   - Change management evidence
+#
+# LOGGING ARCHITECTURE:
+#   1. Ansible stdout callback → terminal output during run
+#   2. ansible.cfg log_path → file-based logging on control node
+#   3. Structured JSON logs → shipped to SIEM (Splunk/ELK/Datadog)
+#   4. Notification callbacks → Slack/email on completion/failure
+#
+# SIEM INTEGRATION:
+#   Configure your log shipper (Filebeat, Fluentd, etc.) to tail:
+#   /var/log/ansible/zia-automation.log
+#   and forward to your SIEM with appropriate parsing rules.
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# LOG FILE SETTINGS
+# ---------------------------------------------------------------------------
+# Primary log file path (also set in ansible.cfg)
+# Ensure the directory exists and is writable by the Ansible user
+log_file_path: "/var/log/ansible/zia-automation.log"
+
+# Log rotation settings (configure via logrotate on the control node)
+# Example logrotate config: /etc/logrotate.d/ansible-zia
+# /var/log/ansible/zia-automation.log {
+#     daily
+#     rotate 90
+#     compress
+#     delaycompress
+#     missingok
+#     notifempty
+#     create 0640 ansible ansible
+# }
+
+# ---------------------------------------------------------------------------
+# STRUCTURED LOG FORMAT
+# ---------------------------------------------------------------------------
+# Each log entry includes these fields for SIEM parsing
+log_fields:
+  - timestamp
+  - playbook
+  - task
+  - host
+  - status           # ok, changed, failed, skipped
+  - resource_type    # location, sub_location, gre_tunnel, domain
+  - resource_name
+  - action           # create, update, delete, validate
+  - operator         # who ran the playbook (from git or env var)
+  - change_ticket    # ITSM ticket number (if change_management_enabled)
+  - environment      # production, staging
+  - tenant           # ZIA tenant identifier
+
+# ---------------------------------------------------------------------------
+# AUDIT LOG SETTINGS
+# ---------------------------------------------------------------------------
+# Separate audit log for destructive operations
+# This log should have stricter retention and access controls
+audit_log_enabled: true
+audit_log_path: "/var/log/ansible/zia-audit.log"
+
+# Operations that trigger audit log entries
+audit_log_operations:
+  - delete
+  - bulk_delete
+  - teardown
+  - force_delete
+
+# ---------------------------------------------------------------------------
+# OPERATOR IDENTIFICATION
+# ---------------------------------------------------------------------------
+# Identify who is running the playbook for audit purposes
+# Priority: ANSIBLE_OPERATOR env var > git user > system user
+operator_name: "{{ lookup('env', 'ANSIBLE_OPERATOR') | default(lookup('env', 'USER'), true) }}"
+
+# Git commit hash (for GitOps traceability)
+# Set by CI/CD pipeline: ANSIBLE_GIT_COMMIT=<sha>
+git_commit: "{{ lookup('env', 'ANSIBLE_GIT_COMMIT') | default('manual-run', true) }}"
+
+# CI/CD pipeline identifier
+# Set by CI/CD: ANSIBLE_PIPELINE_ID=<id>
+pipeline_id: "{{ lookup('env', 'ANSIBLE_PIPELINE_ID') | default('', true) }}"
+
+# ---------------------------------------------------------------------------
+# NOTIFICATION SETTINGS
+# ---------------------------------------------------------------------------
+# Pre-flight summary: print a summary of planned changes before executing
+preflight_summary_enabled: true
+
+# Post-run summary: print a summary of what was changed
+postrun_summary_enabled: true
+
+# Notify on playbook start (useful for long-running bulk operations)
+notify_on_start: false
+
+# Notify on playbook completion
+notify_on_completion: true
+
+# Notify on any task failure
+notify_on_failure: true
+
+# ---------------------------------------------------------------------------
+# DEBUG SETTINGS
+# ---------------------------------------------------------------------------
+# Enable debug output for specific components
+# These are controlled by environment variables to avoid committing debug flags
+
+# Enable verbose ZIA API request/response logging
+# WARNING: This may log sensitive data — use only in development
+zia_api_debug: "{{ lookup('env', 'ZIA_API_DEBUG') | default(false) | bool }}"
+
+# Enable Vault lookup debug logging
+# WARNING: This may log token values — use only in development
+vault_debug: "{{ lookup('env', 'VAULT_DEBUG') | default(false) | bool }}"

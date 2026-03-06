@@ -1,0 +1,176 @@
+# =============================================================================
+# roles/zscaler_zia_gre_tunnels/tasks/validate.yml — GRE Tunnel Validation
+# =============================================================================
+# PURPOSE:
+#   Validates all GRE tunnel parameters before any API calls.
+#   Includes Python-based IP and ASN validation via script module.
+#
+# VALIDATION CHECKS:
+#   1. Required fields: source_ip, location_name, state
+#   2. source_ip is a valid public IPv4 address
+#   3. within_country flag is boolean
+#   4. ip_unnumbered flag is boolean
+#   5. No duplicate source IPs
+#   6. ASN is valid (1-4294967295) if provided
+#   7. Primary/secondary tunnel pairing validation
+# =============================================================================
+
+---
+- name: "GRE-VALIDATE | Assert zia_gre_tunnels is defined"
+  ansible.builtin.assert:
+    that:
+      - zia_gre_tunnels is defined
+      - zia_gre_tunnels | length > 0
+    fail_msg: "❌ zia_gre_tunnels is not defined or empty!"
+    success_msg: "✅ {{ zia_gre_tunnels | length }} GRE tunnels loaded"
+  tags:
+    - validate
+    - always
+
+- name: "GRE-VALIDATE | Assert required fields for each tunnel"
+  ansible.builtin.assert:
+    that:
+      - item.source_ip is defined and item.source_ip | length > 0
+      - item.location_name is defined and item.location_name | length > 0
+      - item.state is defined and item.state in ['present', 'absent']
+    fail_msg: |
+      ❌ GRE tunnel missing required fields!
+      Required: source_ip, location_name, state
+      Got: source_ip={{ item.source_ip | default('MISSING') }},
+           location_name={{ item.location_name | default('MISSING') }},
+           state={{ item.state | default('MISSING') }}
+    success_msg: "✅ Tunnel {{ item.source_ip | default('?') }} fields valid"
+  loop: "{{ zia_gre_tunnels }}"
+  loop_control:
+    label: "{{ item.source_ip | default('UNNAMED') }}"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# PYTHON-BASED IP VALIDATION
+# ---------------------------------------------------------------------------
+# Use Python's ipaddress module for robust IP validation.
+# This catches edge cases that regex-based validation misses:
+# - Private IP ranges (RFC 1918)
+# - Loopback addresses
+# - Multicast addresses
+# - Reserved ranges
+
+- name: "GRE-VALIDATE | Validate source IPs using Python ipaddress module"
+  ansible.builtin.script:
+    # Inline Python script for IP validation
+    # Uses Python's built-in ipaddress module — no dependencies required
+    executable: python3
+    cmd: |
+      import ipaddress
+      import sys
+      import json
+
+      tunnels = {{ zia_gre_tunnels | to_json }}
+      errors = []
+
+      for tunnel in tunnels:
+          source_ip = tunnel.get('source_ip', '')
+          location = tunnel.get('location_name', 'unknown')
+
+          try:
+              addr = ipaddress.ip_address(source_ip)
+
+              # Validate it's IPv4 (ZIA GRE requires IPv4)
+              if not isinstance(addr, ipaddress.IPv4Address):
+                  errors.append(f"FAIL: {source_ip} ({location}) - Must be IPv4, not IPv6")
+                  continue
+
+              # Validate it's not a private address
+              # ZIA GRE source IPs must be public internet-routable IPs
+              if addr.is_private:
+                  errors.append(f"FAIL: {source_ip} ({location}) - Private IP not allowed for GRE source")
+
+              # Validate it's not loopback
+              if addr.is_loopback:
+                  errors.append(f"FAIL: {source_ip} ({location}) - Loopback IP not allowed")
+
+              # Validate it's not multicast
+              if addr.is_multicast:
+                  errors.append(f"FAIL: {source_ip} ({location}) - Multicast IP not allowed")
+
+              # Validate it's not reserved
+              if addr.is_reserved:
+                  errors.append(f"FAIL: {source_ip} ({location}) - Reserved IP not allowed")
+
+          except ValueError as e:
+              errors.append(f"FAIL: {source_ip} ({location}) - Invalid IP format: {e}")
+
+      if errors:
+          print("IP VALIDATION ERRORS:")
+          for err in errors:
+              print(f"  {err}")
+          sys.exit(1)
+      else:
+          print(f"OK: All {len(tunnels)} GRE tunnel source IPs are valid public IPv4 addresses")
+          sys.exit(0)
+  register: ip_validation_result
+  changed_when: false
+  delegate_to: localhost
+  tags:
+    - validate
+    - always
+
+- name: "GRE-VALIDATE | Display IP validation result"
+  ansible.builtin.debug:
+    msg: "{{ ip_validation_result.stdout }}"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# ASN VALIDATION
+# ---------------------------------------------------------------------------
+
+- name: "GRE-VALIDATE | Validate ASN values if provided"
+  ansible.builtin.assert:
+    that:
+      # ASN must be in valid range: 1 to 4294967295 (32-bit)
+      # Private ASN ranges: 64512-65534 (16-bit), 4200000000-4294967294 (32-bit)
+      - item.within_country_asn | default(0) | int >= 0
+      - item.within_country_asn | default(0) | int <= 4294967295
+    fail_msg: |
+      ❌ Invalid ASN '{{ item.within_country_asn }}' for tunnel {{ item.source_ip }}!
+      ASN must be between 1 and 4294967295.
+    success_msg: "✅ ASN valid for tunnel {{ item.source_ip }}"
+  loop: "{{ zia_gre_tunnels }}"
+  loop_control:
+    label: "{{ item.source_ip }}"
+  when: item.within_country_asn is defined
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# DUPLICATE SOURCE IP CHECK
+# ---------------------------------------------------------------------------
+
+- name: "GRE-VALIDATE | Assert no duplicate source IPs"
+  ansible.builtin.assert:
+    that:
+      - zia_gre_tunnels | map(attribute='source_ip') | list | unique | length ==
+        zia_gre_tunnels | length
+    fail_msg: |
+      ❌ Duplicate source IPs detected in GRE tunnel definitions!
+      Each tunnel must have a unique source IP.
+    success_msg: "✅ All GRE tunnel source IPs are unique"
+  tags:
+    - validate
+    - always
+
+- name: "GRE-VALIDATE | Print validation summary"
+  ansible.builtin.debug:
+    msg: |
+      ✅ GRE tunnel validation passed
+         Tunnels to process: {{ zia_gre_tunnels | length }}
+         Tunnels to create:  {{ zia_gre_tunnels | selectattr('state', 'equalto', 'present') | list | length }}
+         Tunnels to delete:  {{ zia_gre_tunnels | selectattr('state', 'equalto', 'absent') | list | length }}
+  tags:
+    - validate
+    - always

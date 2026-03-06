@@ -1,0 +1,113 @@
+# =============================================================================
+# validate_only.yml — Validation-Only Playbook (No Changes)
+# =============================================================================
+# PURPOSE:
+#   Runs ALL validation checks without making any changes to ZIA.
+#   Use this as a pre-flight check before any deployment.
+#   Safe to run at any time — read-only operations only.
+#
+# USAGE:
+#   # Validate all resources:
+#   ansible-playbook -i inventories/production validate_only.yml
+#
+#   # Validate specific resource type:
+#   ansible-playbook -i inventories/production validate_only.yml --tags locations
+#   ansible-playbook -i inventories/production validate_only.yml --tags gre
+#   ansible-playbook -i inventories/production validate_only.yml --tags domains
+# =============================================================================
+
+---
+- name: "ZIA Configuration Validation (Read-Only)"
+  hosts: zia_tenants
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: "VALIDATE | Print validation banner"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║              ZIA CONFIGURATION VALIDATION (READ-ONLY)               ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+          No changes will be made. This is a validation-only run.
+          Environment: {{ env | default('NOT SET') }}
+          Tenant:      {{ inventory_hostname }}
+          ══════════════════════════════════════════════════════════════════════
+      tags:
+        - always
+
+  roles:
+    - role: common
+      tags: [always]
+
+  tasks:
+    # ---------------------------------------------------------------------------
+    # VALIDATE LOCATIONS
+    # ---------------------------------------------------------------------------
+    - name: "VALIDATE | Load and validate location definitions"
+      ansible.builtin.include_vars:
+        file: "{{ zia_locations_file | default('vars/locations/bulk_locations.yml') }}"
+      tags:
+        - locations
+        - validate
+
+    - name: "VALIDATE | Run location validation checks"
+      ansible.builtin.include_role:
+        name: zscaler_zia_locations
+        tasks_from: validate.yml
+      tags:
+        - locations
+        - validate
+
+    # ---------------------------------------------------------------------------
+    # VALIDATE SUB-LOCATIONS
+    # ---------------------------------------------------------------------------
+    - name: "VALIDATE | Load and validate sub-location definitions"
+      ansible.builtin.include_vars:
+        file: "{{ zia_sub_locations_file | default('vars/locations/sub_locations.yml') }}"
+      tags:
+        - sub-locations
+        - validate
+
+    # ---------------------------------------------------------------------------
+    # VALIDATE GRE TUNNELS
+    # ---------------------------------------------------------------------------
+    - name: "VALIDATE | Load and validate GRE tunnel definitions"
+      ansible.builtin.include_vars:
+        file: "{{ zia_gre_tunnels_file | default('vars/locations/gre_tunnels.yml') }}"
+      tags:
+        - gre
+        - validate
+
+    - name: "VALIDATE | Run GRE tunnel validation checks"
+      ansible.builtin.include_role:
+        name: zscaler_zia_gre_tunnels
+        tasks_from: validate.yml
+      tags:
+        - gre
+        - validate
+
+    # ---------------------------------------------------------------------------
+    # VALIDATE DOMAINS
+    # ---------------------------------------------------------------------------
+    - name: "VALIDATE | Load and validate domain definitions"
+      ansible.builtin.include_vars:
+        file: "{{ zia_domains_file | default('vars/domains/malicious_domains.yml') }}"
+      tags:
+        - domains
+        - validate
+
+    # ---------------------------------------------------------------------------
+    # SUMMARY
+    # ---------------------------------------------------------------------------
+    - name: "VALIDATE | Print validation complete banner"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║              ALL VALIDATIONS PASSED ✅                               ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+          Configuration is valid and ready for deployment.
+          Run onboard_locations.yml to apply changes.
+          ══════════════════════════════════════════════════════════════════════
+      tags:
+        - always

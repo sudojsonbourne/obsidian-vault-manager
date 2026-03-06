@@ -1,0 +1,112 @@
+# =============================================================================
+# roles/zscaler_zia_sub_locations/tasks/validate.yml — Sub-Location Validation
+# =============================================================================
+# PURPOSE:
+#   Validates sub-location definitions AND verifies parent locations exist.
+#   The parent existence check is the critical dependency validation.
+# =============================================================================
+
+---
+- name: "SUB-VALIDATE | Assert zia_sub_locations is defined"
+  ansible.builtin.assert:
+    that:
+      - zia_sub_locations is defined
+      - zia_sub_locations | length > 0
+    fail_msg: "❌ zia_sub_locations is not defined or empty!"
+    success_msg: "✅ {{ zia_sub_locations | length }} sub-locations loaded"
+  tags:
+    - validate
+    - always
+
+- name: "SUB-VALIDATE | Assert required fields for each sub-location"
+  ansible.builtin.assert:
+    that:
+      - item.name is defined and item.name | length > 0
+      - item.parent_name is defined and item.parent_name | length > 0
+      - item.state is defined and item.state in ['present', 'absent']
+      - item.ip_addresses is defined and item.ip_addresses | length > 0
+    fail_msg: |
+      ❌ Sub-location '{{ item.name | default('UNNAMED') }}' missing required fields!
+      Required: name, parent_name, state, ip_addresses
+    success_msg: "✅ Sub-location '{{ item.name }}' fields valid"
+  loop: "{{ zia_sub_locations }}"
+  loop_control:
+    label: "{{ item.name | default('UNNAMED') }}"
+  tags:
+    - validate
+    - always
+
+# ---------------------------------------------------------------------------
+# CRITICAL: VERIFY PARENT LOCATION EXISTS IN ZIA
+# ---------------------------------------------------------------------------
+# This is the key dependency check. Before creating any sub-location,
+# we MUST confirm the parent location exists in ZIA.
+# If the parent doesn't exist, the sub-location cannot be created.
+
+- name: "SUB-VALIDATE | Look up parent location in ZIA API"
+  zscaler.ziacloud.zia_location_management_info:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    name: "{{ item.parent_name }}"
+  register: parent_lookup_results
+  loop: "{{ zia_sub_locations | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    label: "{{ item.name }} → parent: {{ item.parent_name }}"
+  no_log: true
+  tags:
+    - validate
+    - always
+
+- name: "SUB-VALIDATE | Assert parent location exists for each sub-location"
+  ansible.builtin.assert:
+    that:
+      # The parent lookup must return at least one result
+      - item.data | default([]) | length > 0
+    fail_msg: |
+      ❌ PARENT LOCATION NOT FOUND: '{{ zia_sub_locations[loop_index].parent_name }}'
+
+      Sub-location '{{ zia_sub_locations[loop_index].name }}' requires parent
+      location '{{ zia_sub_locations[loop_index].parent_name }}' to exist in ZIA.
+
+      RESOLUTION:
+        1. Ensure the parent location is defined in vars/locations/bulk_locations.yml
+        2. Run the location management role first:
+           ansible-playbook onboard_locations.yml --tags create
+        3. Then re-run sub-location management
+
+      The sub-location role MUST run AFTER the location role.
+    success_msg: "✅ Parent '{{ zia_sub_locations[loop_index].parent_name }}' exists for '{{ zia_sub_locations[loop_index].name }}'"
+  loop: "{{ parent_lookup_results.results }}"
+  loop_control:
+    index_var: loop_index
+    label: "{{ zia_sub_locations[loop_index].name | default('unknown') }}"
+  tags:
+    - validate
+    - always
+
+- name: "SUB-VALIDATE | Cache parent location IDs for use in create tasks"
+  ansible.builtin.set_fact:
+    # Build a dict mapping parent_name -> parent_id for quick lookup
+    parent_location_id_map: >-
+      {{ parent_location_id_map | default({}) |
+         combine({item.item.parent_name: item.data[0].id | default(0)}) }}
+  loop: "{{ parent_lookup_results.results }}"
+  loop_control:
+    label: "{{ item.item.parent_name }}"
+  when: item.data | default([]) | length > 0
+  no_log: true
+  tags:
+    - validate
+    - always
+
+- name: "SUB-VALIDATE | Print validation summary"
+  ansible.builtin.debug:
+    msg: |
+      ✅ Sub-location validation passed
+         Sub-locations to process: {{ zia_sub_locations | length }}
+         Parent locations verified: {{ parent_lookup_results.results | selectattr('data', 'defined') | list | length }}
+  tags:
+    - validate
+    - always

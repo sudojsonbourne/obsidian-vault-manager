@@ -1,0 +1,24 @@
+# =============================================================================
+# roles/zscaler_zia_sub_locations/tasks/delete.yml — Sub-Location Deletion
+# =============================================================================
+---
+- name: "SUB-DELETE | Delete sub-location: {{ sub_location_item.name }}"
+  zscaler.ziacloud.zia_location_management:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    name: "{{ sub_location_item.name }}"
+    state: absent
+  register: sub_delete_result
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+  no_log: true
+  tags:
+    - delete
+
+- name: "SUB-DELETE | Report deletion: {{ sub_location_item.name }}"
+  ansible.builtin.debug:
+    msg: "{{ '✅ DELETED' if sub_delete_result.changed | default(false) else 'ℹ️  NOT FOUND' }}: {{ sub_location_item.name }}"
+  tags:
+    - delete

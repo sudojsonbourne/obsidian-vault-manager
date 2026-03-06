@@ -1,0 +1,120 @@
+# =============================================================================
+# roles/zscaler_zia_domain_blocking/tasks/validate.yml — FQDN Validation
+# =============================================================================
+# PURPOSE:
+#   Validates all domain names before adding them to ZIA.
+#   Uses Python regex for robust FQDN format validation.
+# =============================================================================
+
+---
+- name: "DOMAIN-VALIDATE | Assert domain list is not empty"
+  ansible.builtin.assert:
+    that:
+      - all_domains_to_block is defined
+      - all_domains_to_block | length > 0
+    fail_msg: |
+      ❌ No domains to process!
+      Provide domains via vars/domains/malicious_domains.yml or
+      --extra-vars "domains_to_block=['evil.com']"
+    success_msg: "✅ {{ all_domains_to_block | length }} domains loaded for processing"
+  tags:
+    - validate
+    - always
+
+- name: "DOMAIN-VALIDATE | Validate FQDN format using Python"
+  ansible.builtin.script:
+    executable: python3
+    cmd: |
+      import re
+      import sys
+
+      # RFC 1123 compliant FQDN pattern
+      # Allows: letters, digits, hyphens, dots
+      # Disallows: leading/trailing hyphens per label, consecutive dots
+      FQDN_PATTERN = re.compile(
+          r'^(?!-)'                          # No leading hyphen
+          r'(?:[a-zA-Z0-9]'                  # First char: alphanumeric
+          r'(?:[a-zA-Z0-9\-]{0,61}'          # Middle: alphanumeric or hyphen
+          r'[a-zA-Z0-9])?\.)'                # Last char before dot: alphanumeric
+          r'+[a-zA-Z]{2,}$'                  # TLD: at least 2 letters
+      )
+
+      # Wildcard pattern: *.example.com
+      WILDCARD_PATTERN = re.compile(
+          r'^\*\.'                           # Must start with *.
+          r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)'
+          r'+[a-zA-Z]{2,}$'
+      )
+
+      domains = {{ all_domains_to_block | to_json }}
+      errors = []
+      warnings = []
+
+      for domain in domains:
+          domain = domain.strip().lower()
+
+          # Check length (max 253 chars per RFC 1035)
+          if len(domain) > 253:
+              errors.append(f"FAIL: '{domain}' exceeds 253 character limit")
+              continue
+
+          # Check for valid FQDN or wildcard
+          if not (FQDN_PATTERN.match(domain) or WILDCARD_PATTERN.match(domain)):
+              errors.append(f"FAIL: '{domain}' is not a valid FQDN")
+              continue
+
+          # Warn about common mistakes
+          if domain.startswith('http://') or domain.startswith('https://'):
+              errors.append(f"FAIL: '{domain}' contains URL scheme — use domain only (e.g., evil.com)")
+              continue
+
+          if '/' in domain:
+              errors.append(f"FAIL: '{domain}' contains path — use domain only (e.g., evil.com)")
+              continue
+
+      if errors:
+          print(f"FQDN VALIDATION ERRORS ({len(errors)} failures):")
+          for err in errors:
+              print(f"  {err}")
+          sys.exit(1)
+      else:
+          print(f"OK: All {len(domains)} domains passed FQDN validation")
+          sys.exit(0)
+  register: fqdn_validation_result
+  changed_when: false
+  delegate_to: localhost
+  tags:
+    - validate
+    - always
+
+- name: "DOMAIN-VALIDATE | Display FQDN validation result"
+  ansible.builtin.debug:
+    msg: "{{ fqdn_validation_result.stdout }}"
+  tags:
+    - validate
+    - always
+
+- name: "DOMAIN-VALIDATE | Check for duplicate domains"
+  ansible.builtin.assert:
+    that:
+      - all_domains_to_block | unique | length == all_domains_to_block | length
+    fail_msg: |
+      ⚠️  Duplicate domains detected — they will be deduplicated automatically.
+      This is a warning, not an error.
+    success_msg: "✅ No duplicate domains found"
+  ignore_errors: true
+  tags:
+    - validate
+    - always
+
+- name: "DOMAIN-VALIDATE | Print validation summary"
+  ansible.builtin.debug:
+    msg: |
+      ✅ Domain validation passed
+         Total domains:      {{ all_domains_to_block | length }}
+         Unique domains:     {{ all_domains_to_block | unique | length }}
+         Wildcard domains:   {{ all_domains_to_block | select('match', '^\*\.') | list | length }}
+         Standard domains:   {{ all_domains_to_block | reject('match', '^\*\.') | list | length }}
+  tags:
+    - validate
+    - always

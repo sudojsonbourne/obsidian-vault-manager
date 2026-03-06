@@ -1,0 +1,49 @@
+! Cisco IOS Sample Configuration - Router-Core-1
+! Generated for NetDiagram testing
+!
+hostname Router-Core-1
+!
+! --- Interfaces ---
+interface GigabitEthernet0/0
+ description WAN Uplink to ISP
+ ip address 203.0.113.1 255.255.255.252
+ speed 1000
+ duplex full
+ no shutdown
+!
+interface GigabitEthernet0/1
+ description LAN - Server Segment
+ ip address 10.0.1.1 255.255.255.0
+ speed 1000
+ duplex full
+ no shutdown
+!
+interface GigabitEthernet0/2
+ description DMZ
+ ip address 172.16.0.1 255.255.255.0
+ speed 1000
+ duplex full
+ no shutdown
+!
+interface GigabitEthernet0/3
+ description Link to Switch-Access-1
+ ip address 10.0.0.1 255.255.255.252
+ speed 1000
+ duplex full
+ no shutdown
+!
+interface Loopback0
+ ip address 192.168.255.1 255.255.255.255
+!
+! --- OSPF Routing ---
+router ospf 1
+ router-id 192.168.255.1
+ network 10.0.0.0 0.0.0.3 area 0
+ network 10.0.1.0 0.0.0.255 area 0
+ network 172.16.0.0 0.0.0.255 area 0
+!
+! --- Static Routes ---
+ip route 0.0.0.0 0.0.0.0 203.0.113.2
+ip route 192.168.100.0 255.255.255.0 10.0.1.254
+!
+end

@@ -1,0 +1,11 @@
+# =============================================================================
+# roles/zscaler_zia_domain_blocking/defaults/main.yml
+# =============================================================================
+---
+domain_block_category_name: "MALICIOUS_DOMAINS"
+domain_block_category_description: "Malicious domains blocked by Ansible automation"
+zia_auto_activate: true
+zia_api_max_retries: 3
+zia_api_retry_delay: 5
+malicious_domains: []
+domains_to_block: []

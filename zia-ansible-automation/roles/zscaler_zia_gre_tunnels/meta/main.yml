@@ -1,0 +1,12 @@
+# =============================================================================
+# roles/zscaler_zia_gre_tunnels/meta/main.yml
+# =============================================================================
+---
+galaxy_info:
+  role_name: zscaler_zia_gre_tunnels
+  author: "Network Automation Team"
+  description: "Manages ZIA GRE tunnels with IP/ASN validation"
+  min_ansible_version: "2.14"
+
+dependencies:
+  - role: common

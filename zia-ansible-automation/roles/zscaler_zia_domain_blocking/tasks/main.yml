@@ -1,0 +1,149 @@
+# =============================================================================
+# roles/zscaler_zia_domain_blocking/tasks/main.yml — Domain Blocking
+# =============================================================================
+# PURPOSE:
+#   Manages ZIA custom URL categories for malicious domain blocking.
+#   Adds domains to a "MALICIOUS_DOMAINS" custom category which is then
+#   referenced by a URL filtering policy to block access.
+#
+# ARCHITECTURE:
+#   ZIA Domain Blocking Flow:
+#   1. Domains are added to a Custom URL Category (MALICIOUS_DOMAINS)
+#   2. A URL Filtering Rule references this category with action=BLOCK
+#   3. When a user tries to access a blocked domain, ZIA blocks it
+#   4. The block page is shown to the user
+#
+# SAFE STATE MANAGEMENT:
+#   - Domains are ADDED to the category (never replace the full list)
+#   - Existing domains are preserved (idempotent)
+#   - Duplicate domains are automatically deduplicated
+#   - FQDN format is validated before adding
+#   - Removal requires explicit state=absent per domain
+#
+# BULK INPUT SUPPORT:
+#   Domains can be provided via:
+#   1. vars/domains/malicious_domains.yml (file-based)
+#   2. --extra-vars "domains_to_block=['evil.com','bad.net']" (CLI)
+#   3. Both sources are merged and deduplicated
+# =============================================================================
+
+---
+- name: "DOMAINS | Load domain definitions from vars file"
+  ansible.builtin.include_vars:
+    file: "{{ zia_domains_file | default('vars/domains/malicious_domains.yml') }}"
+  tags:
+    - always
+    - domains
+
+- name: "DOMAINS | Merge CLI domains with file domains"
+  ansible.builtin.set_fact:
+    # Merge domains from file with any domains passed via --extra-vars
+    # Deduplicate the combined list
+    all_domains_to_block: >-
+      {{ (malicious_domains | default([]) +
+          domains_to_block | default([])) | unique | sort }}
+  tags:
+    - always
+    - domains
+
+- name: "DOMAINS | Run FQDN validation"
+  ansible.builtin.include_tasks:
+    file: validate.yml
+  tags:
+    - always
+    - validate
+
+- name: "DOMAINS | Display domain processing summary"
+  ansible.builtin.debug:
+    msg: |
+      🔒 Domain Blocking Summary
+      ─────────────────────────────────────────────────────────────
+      Total domains to process: {{ all_domains_to_block | length }}
+      Domains to BLOCK:         {{ all_domains_to_block | length }}
+      Category name:            {{ domain_block_category_name }}
+      ─────────────────────────────────────────────────────────────
+  tags:
+    - always
+    - domains
+
+- name: "DOMAINS | Get or create the malicious domains URL category"
+  zscaler.ziacloud.zia_url_categories:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    # Category configuration
+    configured_name: "{{ domain_block_category_name }}"
+    super_category: "USER_DEFINED"
+    type: "URL_CATEGORY"
+    # Add all validated domains to this category
+    # The module handles deduplication and idempotency
+    urls: "{{ all_domains_to_block }}"
+    description: "{{ domain_block_category_description }}"
+    state: present
+  register: category_result
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+  no_log: true
+  when:
+    - all_domains_to_block | length > 0
+    - not ansible_check_mode
+  tags:
+    - domains
+    - block
+
+- name: "DOMAINS | Check mode — show what would be blocked"
+  ansible.builtin.debug:
+    msg: |
+      🔍 CHECK MODE — No changes made. Would block these domains:
+      {% for domain in all_domains_to_block %}
+        🚫 {{ domain }}
+      {% endfor %}
+  when: ansible_check_mode
+  tags:
+    - domains
+    - block
+
+- name: "DOMAINS | Report category update result"
+  ansible.builtin.debug:
+    msg: |
+      {% if category_result is defined and category_result.changed | default(false) %}
+      ✅ UPDATED: Category '{{ domain_block_category_name }}' updated with {{ all_domains_to_block | length }} domains
+      {% elif category_result is defined %}
+      ℹ️  NO CHANGE: Category '{{ domain_block_category_name }}' already contains all domains
+      {% endif %}
+  when: not ansible_check_mode
+  tags:
+    - domains
+
+- name: "DOMAINS | Activate ZIA to enforce domain blocks"
+  zscaler.ziacloud.zia_activation_status:
+    status: "ACTIVE"
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+  when:
+    - zia_auto_activate | default(true)
+    - not ansible_check_mode
+    - category_result is defined
+    - category_result.changed | default(false)
+  no_log: true
+  tags:
+    - activate
+    - domains
+
+- name: "DOMAINS | Print post-run summary"
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════╗
+      ║              DOMAIN BLOCKING — COMPLETE                      ║
+      ╚══════════════════════════════════════════════════════════════╝
+      Domains processed:  {{ all_domains_to_block | length }}
+      Category:           {{ domain_block_category_name }}
+      Check mode:         {{ ansible_check_mode }}
+      Changes applied:    {{ category_result.changed | default(false) if not ansible_check_mode else 'N/A (check mode)' }}
+      ══════════════════════════════════════════════════════════════
+  tags:
+    - always
+    - domains

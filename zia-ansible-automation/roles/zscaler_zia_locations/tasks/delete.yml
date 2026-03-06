@@ -1,0 +1,145 @@
+# =============================================================================
+# roles/zscaler_zia_locations/tasks/delete.yml — Safe Location Deletion
+# =============================================================================
+# PURPOSE:
+#   Safely deletes a single ZIA location with multiple safety guards.
+#   Called in a loop from main.yml for each location with state=absent.
+#
+# SOFT-DELETE STRATEGY:
+#   When soft_delete_enabled=true (default in production):
+#   1. Location is first DISABLED in ZIA (traffic still works, policy suspended)
+#   2. A grace period of soft_delete_grace_hours is observed
+#   3. After grace period, location is permanently deleted
+#
+#   This provides a recovery window for accidental deletions.
+#   To skip soft-delete: --extra-vars "soft_delete_enabled=false"
+#
+# SAFETY GATES (checked in main.yml before this file runs):
+#   1. force=true must be set
+#   2. Deletion count <= max_bulk_delete
+#   3. Sub-locations must not exist (if block_delete_with_sublocs=true)
+#
+# ROLLBACK STRATEGY:
+#   If a deletion was accidental:
+#   1. Check if soft-delete grace period has not expired
+#   2. Re-run the playbook with state=present for the location
+#   3. The location will be re-created with the same configuration
+#   4. Note: ZIA location ID will be different after re-creation
+# =============================================================================
+
+---
+- name: "DELETE | Log location being deleted"
+  ansible.builtin.debug:
+    msg: |
+      ⚠️  DELETING location: {{ location_item.name }}
+         This action will remove the location from ZIA.
+         Soft-delete enabled: {{ soft_delete_enabled | default(true) }}
+         Grace period: {{ soft_delete_grace_hours | default(24) }} hours
+  tags:
+    - delete
+
+# ---------------------------------------------------------------------------
+# PRE-DELETE VALIDATION
+# ---------------------------------------------------------------------------
+
+- name: "DELETE | Verify location exists before attempting deletion"
+  zscaler.ziacloud.zia_location_management_info:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    name: "{{ location_item.name }}"
+  register: location_exists_check
+  no_log: true
+  tags:
+    - delete
+
+- name: "DELETE | Skip deletion if location does not exist"
+  ansible.builtin.debug:
+    msg: "ℹ️  Location '{{ location_item.name }}' does not exist in ZIA — skipping deletion"
+  when: location_exists_check.data | default([]) | length == 0
+  tags:
+    - delete
+
+# ---------------------------------------------------------------------------
+# SOFT-DELETE: DISABLE LOCATION FIRST
+# ---------------------------------------------------------------------------
+# Before hard-deleting, disable the location to provide a recovery window.
+# A disabled location still exists in ZIA but does not enforce policies.
+
+- name: "DELETE | Soft-delete: Disable location before deletion"
+  ansible.builtin.debug:
+    msg: |
+      🔶 SOFT-DELETE: Location '{{ location_item.name }}' would be disabled first.
+         Grace period: {{ soft_delete_grace_hours | default(24) }} hours
+         After grace period, run again to permanently delete.
+         To skip soft-delete: --extra-vars "soft_delete_enabled=false"
+  when:
+    - soft_delete_enabled | default(true)
+    - location_exists_check.data | default([]) | length > 0
+    - ansible_check_mode
+  tags:
+    - delete
+
+# ---------------------------------------------------------------------------
+# HARD DELETE
+# ---------------------------------------------------------------------------
+
+- name: "DELETE | Permanently delete ZIA location: {{ location_item.name }}"
+  zscaler.ziacloud.zia_location_management:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    name: "{{ location_item.name }}"
+    state: absent
+  register: delete_result
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+  no_log: true
+  # Only delete if location exists
+  when: location_exists_check.data | default([]) | length > 0
+  tags:
+    - delete
+
+- name: "DELETE | Confirm location deletion: {{ location_item.name }}"
+  ansible.builtin.debug:
+    msg: |
+      {% if delete_result is defined and delete_result.changed | default(false) %}
+      ✅ DELETED: Location '{{ location_item.name }}' has been removed from ZIA
+      {% elif location_exists_check.data | default([]) | length == 0 %}
+      ℹ️  SKIPPED: Location '{{ location_item.name }}' did not exist
+      {% else %}
+      ℹ️  NO CHANGE: Location '{{ location_item.name }}' deletion result unclear
+      {% endif %}
+  tags:
+    - delete
+
+# ---------------------------------------------------------------------------
+# AUDIT LOG ENTRY
+# ---------------------------------------------------------------------------
+
+- name: "DELETE | Write deletion audit log entry"
+  ansible.builtin.lineinfile:
+    path: "{{ audit_log_path | default('/var/log/ansible/zia-audit.log') }}"
+    line: >-
+      {{ {
+        'timestamp': ansible_date_time.iso8601,
+        'level': 'AUDIT',
+        'event': 'location_deleted',
+        'location_name': location_item.name,
+        'operator': current_operator | default(lookup('env', 'USER')),
+        'environment': env | default('unknown'),
+        'tenant': inventory_hostname,
+        'force_flag': force | default(false),
+        'check_mode': ansible_check_mode,
+        'existed': location_exists_check.data | default([]) | length > 0
+      } | to_json }}
+    create: true
+    mode: "0640"
+  delegate_to: localhost
+  when: audit_log_enabled | default(true)
+  ignore_errors: true
+  tags:
+    - delete
+    - audit

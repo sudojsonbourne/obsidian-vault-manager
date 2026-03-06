@@ -1,0 +1,287 @@
+# =============================================================================
+# roles/zscaler_zia_locations/tasks/main.yml — Location Role Entry Point
+# =============================================================================
+# PURPOSE:
+#   Orchestrates the complete lifecycle of ZIA location management.
+#   This file is the conductor — it calls specialized task files in the
+#   correct order to safely manage locations.
+#
+# EXECUTION FLOW:
+#   1. Load location data from vars file
+#   2. Run validate.yml — pre-flight validation (ALWAYS runs first)
+#   3. For each location with state=present: run create.yml or update.yml
+#   4. For each location with state=absent: run delete.yml (with guards)
+#   5. Activate ZIA to push changes to enforcement nodes
+#
+# WHY TASKS ARE SEPARATED INTO FILES:
+#   - validate.yml: Runs BEFORE any changes. Can be run standalone.
+#   - create.yml:   Only handles creation logic. Clean separation of concerns.
+#   - update.yml:   Only handles update logic. Idempotent by design.
+#   - delete.yml:   Only handles deletion. Has the most safety guards.
+#
+#   This separation allows:
+#   - Running only validation: --tags validate
+#   - Running only creation: --tags create
+#   - Running only deletion: --tags delete
+#   - Easier unit testing with Molecule
+#   - Clearer audit trails (which task file caused a change)
+#
+# IDEMPOTENCY STRATEGY:
+#   The ZIA Ansible collection modules are idempotent by design.
+#   The module checks if the resource exists before creating/updating.
+#   If the resource matches the desired state, no API call is made.
+#   This means running this role multiple times is SAFE.
+#
+# TAGGING STRATEGY:
+#   - always:   Tasks that always run (validation, logging)
+#   - validate: Pre-flight validation only
+#   - create:   Location creation tasks
+#   - update:   Location update tasks
+#   - delete:   Location deletion tasks (requires force=true)
+#   - activate: ZIA activation tasks
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# STEP 0: LOAD LOCATION DATA
+# ---------------------------------------------------------------------------
+# Load location definitions from the vars file specified in inventory.
+# This allows different tenants to use different location files.
+
+- name: "LOCATIONS | Load location definitions from vars file"
+  ansible.builtin.include_vars:
+    # Use the tenant-specific locations file if defined in inventory,
+    # otherwise fall back to the default bulk_locations.yml
+    file: "{{ zia_locations_file | default('vars/locations/bulk_locations.yml') }}"
+  tags:
+    - always
+    - locations
+
+# ---------------------------------------------------------------------------
+# STEP 1: VALIDATION (ALWAYS RUNS FIRST)
+# ---------------------------------------------------------------------------
+# Validation MUST run before any changes. This is non-negotiable.
+# If validation fails, the entire role stops — no partial changes.
+#
+# WHY VALIDATION RUNS FIRST:
+#   - Catches configuration errors before they cause production impact
+#   - Validates naming conventions, IP formats, required fields
+#   - Checks for conflicts with existing ZIA configuration
+#   - Provides clear error messages for operators to fix issues
+#   - Can be run standalone (--tags validate) for pre-change checks
+
+- name: "LOCATIONS | Run pre-flight validation"
+  ansible.builtin.include_tasks:
+    file: validate.yml
+    apply:
+      tags:
+        - validate
+        - always
+  tags:
+    - always
+    - validate
+
+# ---------------------------------------------------------------------------
+# STEP 2: APPLY FILTER (if location_filter_tag or target_location set)
+# ---------------------------------------------------------------------------
+# Allow operators to target specific locations without editing the vars file.
+# This is useful for:
+#   - Testing a single location before bulk rollout
+#   - Applying changes to a specific region
+#   - Debugging a specific location
+
+- name: "LOCATIONS | Apply location filter (by tag)"
+  ansible.builtin.set_fact:
+    # Filter locations by tag if location_filter_tag is set
+    # Otherwise use all locations
+    zia_locations_filtered: >-
+      {%- if location_filter_tag | length > 0 -%}
+        {{ zia_locations | selectattr('tags', 'defined') |
+           selectattr('tags', 'contains', location_filter_tag) | list }}
+      {%- elif target_location | length > 0 -%}
+        {{ zia_locations | selectattr('name', 'equalto', target_location) | list }}
+      {%- else -%}
+        {{ zia_locations }}
+      {%- endif -%}
+  tags:
+    - always
+    - locations
+
+- name: "LOCATIONS | Display filtered location count"
+  ansible.builtin.debug:
+    msg: |
+      📍 Processing {{ zia_locations_filtered | length }} location(s)
+      {% if location_filter_tag | length > 0 %}
+         Filter: tag={{ location_filter_tag }}
+      {% elif target_location | length > 0 %}
+         Filter: name={{ target_location }}
+      {% else %}
+         Filter: none (all locations)
+      {% endif %}
+  tags:
+    - always
+    - locations
+
+# ---------------------------------------------------------------------------
+# STEP 3: CREATE / UPDATE LOCATIONS (state: present)
+# ---------------------------------------------------------------------------
+# Process all locations marked state: present.
+# The create/update tasks handle idempotency internally.
+
+- name: "LOCATIONS | Process locations with state=present"
+  ansible.builtin.include_tasks:
+    file: create.yml
+    apply:
+      tags:
+        - create
+        - update
+  # Loop over each location marked as present
+  loop: "{{ zia_locations_filtered | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    loop_var: location_item
+    label: "{{ location_item.name }}"
+    # Pause between iterations to respect ZIA API rate limits
+    pause: "{{ zia_api_rate_limit_delay }}"
+  tags:
+    - create
+    - update
+    - locations
+
+# ---------------------------------------------------------------------------
+# STEP 4: DELETE LOCATIONS (state: absent)
+# ---------------------------------------------------------------------------
+# Process all locations marked state: absent.
+# Deletion has the most safety guards — see delete.yml for details.
+#
+# SAFETY GATES:
+#   1. force=true must be set (prevents accidental deletion)
+#   2. Deletion count must not exceed max_bulk_delete
+#   3. Each location is validated before deletion
+#   4. Soft-delete is applied first (if enabled)
+
+- name: "LOCATIONS | Check deletion safety gates"
+  ansible.builtin.assert:
+    that:
+      # Gate 1: force flag must be explicitly set
+      - force | bool
+    fail_msg: |
+      ❌ DELETION BLOCKED: force=true is required to delete locations!
+
+      {{ zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length }}
+      location(s) are marked for deletion but force=true was not set.
+
+      To enable deletion, run with:
+        --extra-vars "force=true"
+
+      CAUTION: This will permanently delete locations from ZIA.
+      Run with --check first to preview changes.
+    success_msg: "✅ Force flag confirmed — deletion authorized"
+  # Only run this check if there are locations to delete
+  when:
+    - zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length > 0
+    - not ansible_check_mode
+  tags:
+    - delete
+    - locations
+
+- name: "LOCATIONS | Check bulk deletion limit"
+  ansible.builtin.assert:
+    that:
+      # Gate 2: deletion count must not exceed max_bulk_delete
+      - zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length <= max_bulk_delete
+    fail_msg: |
+      ❌ DELETION BLOCKED: Too many locations marked for deletion!
+
+      Attempting to delete: {{ zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length }}
+      Maximum allowed:      {{ max_bulk_delete }}
+
+      To increase the limit (use with extreme caution):
+        --extra-vars "max_bulk_delete=<number>"
+
+      This limit exists to prevent accidental mass deletion.
+    success_msg: "✅ Deletion count within safe limit"
+  when:
+    - zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length > 0
+    - not ansible_check_mode
+  tags:
+    - delete
+    - locations
+
+- name: "LOCATIONS | Process locations with state=absent"
+  ansible.builtin.include_tasks:
+    file: delete.yml
+    apply:
+      tags:
+        - delete
+  loop: "{{ zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list }}"
+  loop_control:
+    loop_var: location_item
+    label: "{{ location_item.name }}"
+    pause: "{{ zia_api_rate_limit_delay }}"
+  when:
+    - zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length > 0
+    - force | bool or ansible_check_mode
+  tags:
+    - delete
+    - locations
+
+# ---------------------------------------------------------------------------
+# STEP 5: ACTIVATE ZIA
+# ---------------------------------------------------------------------------
+# After all changes, activate ZIA to push changes to enforcement nodes.
+# Without activation, changes are saved but NOT enforced.
+#
+# ACTIVATION BEHAVIOR:
+#   - Only runs if zia_auto_activate=true (default)
+#   - Skipped in --check mode (no changes to activate)
+#   - Waits up to zia_activation_timeout seconds for completion
+#   - Logs activation result
+
+- name: "LOCATIONS | Activate ZIA to push changes to enforcement nodes"
+  zscaler.ziacloud.zia_activation_status:
+    status: "ACTIVE"
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+  register: activation_result
+  when:
+    - zia_auto_activate | default(true)
+    - not ansible_check_mode
+  no_log: true
+  tags:
+    - activate
+    - locations
+
+- name: "LOCATIONS | Confirm ZIA activation status"
+  ansible.builtin.debug:
+    msg: |
+      ✅ ZIA Activation Status: {{ activation_result.data.status | default('UNKNOWN') }}
+         Changes are now live on all enforcement nodes.
+  when:
+    - zia_auto_activate | default(true)
+    - not ansible_check_mode
+    - activation_result is defined
+  tags:
+    - activate
+    - locations
+
+# ---------------------------------------------------------------------------
+# STEP 6: POST-RUN SUMMARY
+# ---------------------------------------------------------------------------
+
+- name: "LOCATIONS | Print post-run summary"
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════╗
+      ║              LOCATION MANAGEMENT — COMPLETE                  ║
+      ╚══════════════════════════════════════════════════════════════╝
+      Locations processed:  {{ zia_locations_filtered | length }}
+      Created/Updated:      {{ zia_locations_filtered | selectattr('state', 'equalto', 'present') | list | length }}
+      Deleted:              {{ zia_locations_filtered | selectattr('state', 'equalto', 'absent') | list | length }}
+      Check mode:           {{ ansible_check_mode }}
+      ZIA Activated:        {{ zia_auto_activate | default(true) and not ansible_check_mode }}
+      ══════════════════════════════════════════════════════════════
+  tags:
+    - always
+    - locations

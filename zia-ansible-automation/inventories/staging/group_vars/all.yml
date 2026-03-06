@@ -1,0 +1,76 @@
+# =============================================================================
+# inventories/staging/group_vars/all.yml — Staging Group Variables
+# =============================================================================
+# PURPOSE:
+#   Staging-specific variable overrides. These settings relax production
+#   safety controls to allow faster iteration during development/testing.
+#
+# IMPORTANT:
+#   Staging should still use Vault for credentials — never plaintext.
+#   The difference is in safety thresholds, not security posture.
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# ENVIRONMENT IDENTIFIER
+# ---------------------------------------------------------------------------
+env: "staging"
+environment_name: "Staging"
+
+# ---------------------------------------------------------------------------
+# SAFETY CONTROLS — STAGING (RELAXED FOR CI/CD)
+# ---------------------------------------------------------------------------
+# In staging, confirmation prompts are disabled for CI/CD pipeline automation
+require_confirmation: false
+
+# Higher bulk delete limit in staging (testing teardown scenarios)
+max_bulk_delete: 50
+
+# No dry-run by default in staging (we want to test actual changes)
+dry_run: false
+
+# Soft-delete still enabled but with shorter grace period
+soft_delete_enabled: true
+soft_delete_grace_hours: 1        # 1 hour grace in staging vs 24 in production
+
+# ---------------------------------------------------------------------------
+# ZIA API SETTINGS — STAGING
+# ---------------------------------------------------------------------------
+# Staging can be more aggressive with retries (less risk)
+zia_api_rate_limit_delay: 0.5
+zia_api_max_retries: 5
+zia_api_retry_delay: 2
+zia_api_timeout: 30
+
+# ---------------------------------------------------------------------------
+# NOTIFICATION SETTINGS — STAGING
+# ---------------------------------------------------------------------------
+# Staging notifications go to a separate channel
+slack_notifications_enabled: true
+slack_channel: "#zia-automation-staging"
+slack_username: "ZIA Ansible Bot [STAGING]"
+
+# Email notifications disabled in staging to reduce noise
+email_notifications_enabled: false
+
+# ---------------------------------------------------------------------------
+# LOGGING — STAGING
+# ---------------------------------------------------------------------------
+log_level: "DEBUG"                # More verbose in staging
+log_format: "text"                # Human-readable in staging
+log_include_timestamps: true
+log_include_host: true
+log_include_task: true
+
+# ---------------------------------------------------------------------------
+# CHANGE MANAGEMENT — STAGING
+# ---------------------------------------------------------------------------
+# No change ticket required in staging
+change_management_enabled: false
+
+# ---------------------------------------------------------------------------
+# VAULT PATHS — STAGING
+# ---------------------------------------------------------------------------
+vault_base_path: "secret"
+vault_engine: "kv2"
+vault_notifications_path: "secret/notifications/staging"

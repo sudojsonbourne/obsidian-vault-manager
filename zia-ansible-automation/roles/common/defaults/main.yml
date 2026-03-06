@@ -1,0 +1,27 @@
+# =============================================================================
+# roles/common/defaults/main.yml — Common Role Default Variables
+# =============================================================================
+# PURPOSE:
+#   Default variable values for the common role.
+#   These are the LOWEST priority variables — overridden by everything else.
+#
+# VARIABLE PRECEDENCE (lowest to highest):
+#   1. role defaults (this file)
+#   2. inventory group_vars
+#   3. inventory host_vars
+#   4. role vars (roles/*/vars/main.yml)
+#   5. extra vars (--extra-vars)
+# =============================================================================
+
+---
+# Common role defaults
+preflight_summary_enabled: true
+postrun_summary_enabled: true
+audit_log_enabled: true
+vault_fail_on_missing: true
+vault_validate_required_keys: true
+vault_retry_count: 3
+vault_retry_delay: 2
+vault_validate_certs: true
+vault_kv_version: 2
+vault_auth_method: "token"

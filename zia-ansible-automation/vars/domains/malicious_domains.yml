@@ -1,0 +1,291 @@
+# =============================================================================
+# vars/domains/malicious_domains.yml — Malicious Domain Blocklist
+# =============================================================================
+# PURPOSE:
+#   Defines the list of malicious domains to be blocked via ZIA URL filtering.
+#   This file is the data source for the block_malicious_domains.yml playbook.
+#
+# BLOCKING MECHANISM:
+#   ZIA blocks domains through URL Categories and URL Filtering Rules:
+#
+#   1. CUSTOM URL CATEGORY:
+#      A custom URL category named "MALICIOUS_DOMAINS_BLOCKLIST" is created
+#      (or updated) in ZIA containing all domains in this list.
+#
+#   2. URL FILTERING RULE:
+#      A URL filtering rule is created that BLOCKS all traffic to URLs
+#      matching the custom category. The rule is placed at the top of the
+#      rule order for immediate enforcement.
+#
+#   3. ACTIVATION:
+#      After updating the category and rule, ZIA is activated to push
+#      changes to all enforcement nodes globally.
+#
+# DOMAIN FORMAT REQUIREMENTS:
+#   - Must be valid FQDN format (e.g., malicious.example.com)
+#   - Wildcards supported: *.malicious.com (blocks all subdomains)
+#   - No protocol prefix (no http:// or https://)
+#   - No trailing slashes
+#   - No IP addresses (use firewall rules for IP blocking)
+#
+# FQDN VALIDATION:
+#   The domain blocking role validates each domain before submission:
+#   1. Must match FQDN regex: ^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$
+#   2. Must not be a duplicate (checked against existing ZIA category)
+#   3. Must not be an internal domain (configurable exclusion list)
+#   4. TLD must be valid (checked against IANA TLD list)
+#
+# SOURCES FOR MALICIOUS DOMAINS:
+#   - Threat intelligence feeds (MISP, OpenCTI, etc.)
+#   - CISA Known Exploited Vulnerabilities (KEV) catalog
+#   - Internal SOC/SIEM alerts
+#   - Commercial threat intel (CrowdStrike, Recorded Future, etc.)
+#   - Open source feeds (abuse.ch, PhishTank, etc.)
+#
+# BULK INPUT:
+#   For large domain lists (1000+), use the bulk input format:
+#   ansible-playbook block_malicious_domains.yml \
+#     --extra-vars "@vars/domains/bulk_ioc_feed.yml"
+#
+# SAFE STATE MANAGEMENT:
+#   - Domains are ADDED to the existing blocklist (not replaced)
+#   - To remove a domain, set state: absent for that domain
+#   - The playbook is idempotent: adding an existing domain is a no-op
+#   - A backup of the current blocklist is taken before any changes
+#
+# EXAMPLE EXECUTION:
+#   # Apply blocklist (dry-run first):
+#   ansible-playbook -i inventories/production block_malicious_domains.yml --check --diff
+#
+#   # Apply blocklist:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml
+#
+#   # Add domains from command line:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml \
+#     --extra-vars "additional_domains=['evil.com','malware.net']"
+#
+#   # Remove a domain from blocklist:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml \
+#     --extra-vars "domain_state=absent" --tags remove
+# =============================================================================
+
+---
+# ---------------------------------------------------------------------------
+# BLOCKLIST METADATA
+# ---------------------------------------------------------------------------
+# Name of the custom URL category in ZIA
+# This category will be created if it doesn't exist
+blocklist_category_name: "MALICIOUS_DOMAINS_BLOCKLIST"
+blocklist_category_description: "Automatically managed malicious domain blocklist - DO NOT EDIT MANUALLY"
+
+# Name of the URL filtering rule that enforces the blocklist
+blocklist_rule_name: "BLOCK_MALICIOUS_DOMAINS"
+blocklist_rule_description: "Block all traffic to known malicious domains - Managed by Ansible"
+
+# Rule order (1 = highest priority, evaluated first)
+# Place at top to ensure malicious domains are blocked before other rules
+blocklist_rule_order: 1
+
+# Rule action
+blocklist_rule_action: "BLOCK"
+
+# ---------------------------------------------------------------------------
+# DOMAIN BLOCKLIST
+# ---------------------------------------------------------------------------
+# Each entry defines a domain to block.
+# state: present = add to blocklist
+# state: absent  = remove from blocklist
+#
+# IMPORTANT: These are EXAMPLE domains for demonstration.
+# Replace with actual threat intelligence in production.
+# Use RFC 2606 reserved domains (.example, .test, .invalid) for examples.
+
+malicious_domains:
+
+  # ---------------------------------------------------------------------------
+  # PHISHING DOMAINS
+  # ---------------------------------------------------------------------------
+  # Domains used for credential phishing attacks
+  # Source: Internal SOC alerts, PhishTank feed
+
+  - domain: "phishing-login.example.com"
+    state: present
+    category: "phishing"
+    severity: "critical"
+    source: "SOC-ALERT-2024-001"
+    added_date: "2024-01-15"
+    notes: "Credential phishing targeting Office 365 users"
+
+  - domain: "secure-update.example.net"
+    state: present
+    category: "phishing"
+    severity: "high"
+    source: "PhishTank"
+    added_date: "2024-01-20"
+    notes: "Fake software update page"
+
+  - domain: "*.phishing-corp.example"
+    state: present
+    category: "phishing"
+    severity: "critical"
+    source: "Threat-Intel-Feed"
+    added_date: "2024-02-01"
+    notes: "Wildcard block for entire phishing domain"
+
+  # ---------------------------------------------------------------------------
+  # MALWARE C2 (Command & Control) DOMAINS
+  # ---------------------------------------------------------------------------
+  # Domains used by malware for command and control communication
+  # Source: CrowdStrike, abuse.ch URLhaus
+
+  - domain: "c2-server.example.com"
+    state: present
+    category: "malware_c2"
+    severity: "critical"
+    source: "CrowdStrike-Intel"
+    added_date: "2024-01-10"
+    notes: "Cobalt Strike C2 beacon domain"
+
+  - domain: "malware-update.example.org"
+    state: present
+    category: "malware_c2"
+    severity: "critical"
+    source: "abuse.ch"
+    added_date: "2024-01-12"
+    notes: "Emotet malware update domain"
+
+  - domain: "botnet-controller.example.net"
+    state: present
+    category: "malware_c2"
+    severity: "critical"
+    source: "Internal-SIEM"
+    added_date: "2024-01-18"
+    notes: "Active botnet C2 - detected in network traffic"
+
+  - domain: "*.malware-cdn.example"
+    state: present
+    category: "malware_c2"
+    severity: "high"
+    source: "Recorded-Future"
+    added_date: "2024-02-05"
+    notes: "Malware payload delivery CDN"
+
+  # ---------------------------------------------------------------------------
+  # RANSOMWARE DOMAINS
+  # ---------------------------------------------------------------------------
+  # Domains associated with ransomware operations
+  # Source: CISA KEV, FBI Flash alerts
+
+  - domain: "ransom-payment.example.com"
+    state: present
+    category: "ransomware"
+    severity: "critical"
+    source: "CISA-KEV"
+    added_date: "2024-01-05"
+    notes: "LockBit ransomware payment portal"
+
+  - domain: "decrypt-files.example.net"
+    state: present
+    category: "ransomware"
+    severity: "critical"
+    source: "FBI-Flash"
+    added_date: "2024-01-08"
+    notes: "BlackCat/ALPHV ransomware decryption portal"
+
+  # ---------------------------------------------------------------------------
+  # TYPOSQUATTING DOMAINS
+  # ---------------------------------------------------------------------------
+  # Domains that impersonate legitimate corporate or vendor domains
+  # Source: Brand monitoring, internal security team
+
+  - domain: "corp-portal-login.example.com"
+    state: present
+    category: "typosquatting"
+    severity: "high"
+    source: "Brand-Monitor"
+    added_date: "2024-01-25"
+    notes: "Typosquat of corporate portal"
+
+  - domain: "microsoft-update-center.example.net"
+    state: present
+    category: "typosquatting"
+    severity: "high"
+    source: "Brand-Monitor"
+    added_date: "2024-01-28"
+    notes: "Fake Microsoft update site"
+
+  # ---------------------------------------------------------------------------
+  # CRYPTOMINING DOMAINS
+  # ---------------------------------------------------------------------------
+  # Domains used for unauthorized cryptomining (cryptojacking)
+  # Source: Internal network monitoring
+
+  - domain: "mining-pool.example.com"
+    state: present
+    category: "cryptomining"
+    severity: "medium"
+    source: "Internal-Network-Monitor"
+    added_date: "2024-02-10"
+    notes: "Cryptomining pool - unauthorized resource usage"
+
+  - domain: "coinhive-alt.example.net"
+    state: present
+    category: "cryptomining"
+    severity: "medium"
+    source: "Internal-Network-Monitor"
+    added_date: "2024-02-12"
+    notes: "Browser-based cryptomining script host"
+
+  # ---------------------------------------------------------------------------
+  # DATA EXFILTRATION DOMAINS
+  # ---------------------------------------------------------------------------
+  # Domains used for data exfiltration (DNS tunneling, HTTP exfil)
+  # Source: DLP alerts, network anomaly detection
+
+  - domain: "data-sync-service.example.com"
+    state: present
+    category: "exfiltration"
+    severity: "critical"
+    source: "DLP-Alert"
+    added_date: "2024-02-15"
+    notes: "Suspected DNS tunneling exfiltration endpoint"
+
+  # ---------------------------------------------------------------------------
+  # EXAMPLE: DOMAIN REMOVAL
+  # ---------------------------------------------------------------------------
+  # To remove a domain from the blocklist, set state: absent
+  # The domain will be removed from the ZIA URL category
+
+  # - domain: "old-threat.example.com"
+  #   state: absent
+  #   category: "phishing"
+  #   notes: "Domain expired - no longer active threat"
+
+# ---------------------------------------------------------------------------
+# BULK DOMAIN LIST (for high-volume threat intel feeds)
+# ---------------------------------------------------------------------------
+# For large feeds (1000+ domains), use this flat list format.
+# These domains are added to the blocklist without metadata.
+# Useful for importing from threat intel feeds directly.
+#
+# bulk_domains:
+#   - "threat1.example.com"
+#   - "threat2.example.net"
+#   - "*.threat-domain.example"
+#
+# To use bulk domains:
+#   ansible-playbook block_malicious_domains.yml \
+#     --extra-vars "@vars/domains/bulk_ioc_feed.yml"
+
+# ---------------------------------------------------------------------------
+# EXCLUSION LIST
+# ---------------------------------------------------------------------------
+# Domains that should NEVER be blocked, even if they appear in threat feeds.
+# This prevents accidental blocking of legitimate business domains.
+domain_exclusions:
+  - "*.microsoft.com"
+  - "*.office365.com"
+  - "*.google.com"
+  - "*.amazonaws.com"
+  - "*.corp.example.com"          # Internal corporate domain
+  - "*.vendor.example.com"        # Trusted vendor domain

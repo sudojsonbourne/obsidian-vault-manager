@@ -1,0 +1,287 @@
+# =============================================================================
+# vars/locations/gre_tunnels.yml — GRE Tunnel Definitions
+# =============================================================================
+# PURPOSE:
+#   Defines all GRE (Generic Routing Encapsulation) tunnels for ZIA traffic
+#   forwarding. GRE tunnels provide an alternative to PAC files and proxy
+#   settings for forwarding traffic to Zscaler enforcement nodes.
+#
+# GRE TUNNEL ARCHITECTURE:
+#   GRE tunnels create a direct Layer 3 tunnel from your network edge
+#   (router/firewall) to Zscaler's enforcement nodes (ZEN - Zscaler
+#   Enforcement Nodes). Traffic is encapsulated in GRE and forwarded
+#   to ZIA for inspection and policy enforcement.
+#
+#   Network Edge ──GRE──► Zscaler ZEN ──► Internet
+#
+# PRIMARY vs SECONDARY TUNNELS:
+#   Each location should have:
+#   - PRIMARY tunnel: Active tunnel for normal operation
+#   - SECONDARY tunnel: Standby tunnel for failover
+#   The router/firewall uses IP SLA or BFD to detect primary failure
+#   and automatically fails over to the secondary tunnel.
+#
+# IP VALIDATION:
+#   The GRE tunnel role validates:
+#   1. source_ip is a valid public IPv4 address (not RFC1918)
+#   2. primary_dest_vip is a valid Zscaler VIP (from ZIA API)
+#   3. secondary_dest_vip is a valid Zscaler VIP (from ZIA API)
+#   4. within_country routing preference is set correctly
+#
+# ASN VALIDATION:
+#   If BGP is used over GRE (for dynamic routing):
+#   - ASN must be a valid 16-bit or 32-bit ASN
+#   - Private ASN range: 64512-65534 (16-bit) or 4200000000-4294967294 (32-bit)
+#   - Public ASN requires ARIN/RIPE registration
+#
+# FINDING ZSCALER VIPs:
+#   Use the ZIA API to get available VIPs for your cloud:
+#   GET /api/v1/vips?dc=<datacenter>
+#   Or use the Zscaler IP Range tool: https://config.zscaler.com/zscaler.net/cenr
+#
+# FIELD REFERENCE:
+#   name              (required) — Unique tunnel name
+#   state             (required) — 'present' or 'absent'
+#   source_ip         (required) — Public IP of your network edge device
+#   primary_dest_vip  (required) — Primary Zscaler VIP IP address
+#   secondary_dest_vip (required) — Secondary Zscaler VIP IP address
+#   internal_ip_range (optional) — Internal IP range for tunnel (if ip_unnumbered=false)
+#   within_country    (optional) — Keep traffic within same country (default: true)
+#   ip_unnumbered     (optional) — Use unnumbered GRE (default: false)
+#   comment           (optional) — Description/comment for the tunnel
+#   country_code      (optional) — Country code for VIP selection
+#   location_name     (optional) — Associated location name (for reference)
+# =============================================================================
+
+---
+zia_gre_tunnels:
+
+  # ===========================================================================
+  # NEW YORK — GRE TUNNELS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — Primary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-GRE-PRIMARY"
+    state: present
+    comment: "NYC HQ Primary GRE Tunnel - Active"
+    location_name: "NYC-HQ-01"    # Reference to associated location (informational)
+
+    # Source IP: Public IP of the NYC HQ edge router/firewall
+    # This must be the same IP registered in the ZIA location definition
+    # VALIDATION: Must be a valid public IPv4 address (not RFC1918)
+    source_ip: "203.0.113.10"
+
+    # Primary Zscaler VIP: The primary Zscaler enforcement node IP
+    # Find available VIPs at: https://config.zscaler.com/zscaler.net/cenr
+    # For US East locations, use VIPs in the US East datacenter cluster
+    # VALIDATION: Must be a valid Zscaler VIP (validated against ZIA API)
+    primary_dest_vip: "165.225.0.1"    # Example Zscaler US East VIP
+
+    # Secondary Zscaler VIP: Failover enforcement node
+    # Should be in a DIFFERENT datacenter than primary for resilience
+    secondary_dest_vip: "165.225.0.2"  # Example Zscaler US East VIP (different DC)
+
+    # Keep traffic within the United States
+    # Set to false for locations that need global routing
+    within_country: true
+
+    # IP unnumbered: Use unnumbered GRE (no IP assigned to tunnel interface)
+    # Set to true for simpler configuration (no tunnel IP management)
+    ip_unnumbered: true
+
+    # Country code for VIP selection
+    country_code: "US"
+
+    # ASN for BGP over GRE (if using dynamic routing)
+    # Leave commented if using static routing
+    # asn: 65001
+
+  # ---------------------------------------------------------------------------
+  # NYC HQ — Secondary GRE Tunnel (Failover)
+  # ---------------------------------------------------------------------------
+  - name: "NYC-HQ-01-GRE-SECONDARY"
+    state: present
+    comment: "NYC HQ Secondary GRE Tunnel - Standby/Failover"
+    location_name: "NYC-HQ-01"
+
+    # Secondary tunnel uses the same source IP but different Zscaler VIPs
+    # In some designs, a secondary edge device IP is used for true redundancy
+    source_ip: "203.0.113.11"     # Secondary egress IP (or same as primary)
+
+    # Secondary tunnel primary VIP: Different from primary tunnel's primary VIP
+    # This ensures failover goes to a completely different path
+    primary_dest_vip: "165.225.0.3"    # Different Zscaler VIP cluster
+    secondary_dest_vip: "165.225.0.4"
+
+    within_country: true
+    ip_unnumbered: true
+    country_code: "US"
+
+  # ===========================================================================
+  # LOS ANGELES — GRE TUNNELS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # LAX HQ — Primary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "LAX-HQ-01-GRE-PRIMARY"
+    state: present
+    comment: "LA HQ Primary GRE Tunnel - Active"
+    location_name: "LAX-HQ-01"
+    source_ip: "203.0.113.100"
+
+    # US West VIPs for LA location
+    primary_dest_vip: "165.225.1.1"    # Zscaler US West VIP
+    secondary_dest_vip: "165.225.1.2"
+
+    within_country: true
+    ip_unnumbered: true
+    country_code: "US"
+
+  # ---------------------------------------------------------------------------
+  # LAX HQ — Secondary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "LAX-HQ-01-GRE-SECONDARY"
+    state: present
+    comment: "LA HQ Secondary GRE Tunnel - Standby"
+    location_name: "LAX-HQ-01"
+    source_ip: "203.0.113.101"
+    primary_dest_vip: "165.225.1.3"
+    secondary_dest_vip: "165.225.1.4"
+    within_country: true
+    ip_unnumbered: true
+    country_code: "US"
+
+  # ===========================================================================
+  # CHICAGO — GRE TUNNELS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Chicago Hub — Primary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "CHI-HUB-01-GRE-PRIMARY"
+    state: present
+    comment: "Chicago Hub Primary GRE Tunnel"
+    location_name: "CHI-HUB-01"
+    source_ip: "203.0.113.60"
+    primary_dest_vip: "165.225.2.1"    # Zscaler US Central VIP
+    secondary_dest_vip: "165.225.2.2"
+    within_country: true
+    ip_unnumbered: true
+    country_code: "US"
+
+  # ---------------------------------------------------------------------------
+  # Chicago Hub — Secondary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "CHI-HUB-01-GRE-SECONDARY"
+    state: present
+    comment: "Chicago Hub Secondary GRE Tunnel"
+    location_name: "CHI-HUB-01"
+    source_ip: "203.0.113.61"
+    primary_dest_vip: "165.225.2.3"
+    secondary_dest_vip: "165.225.2.4"
+    within_country: true
+    ip_unnumbered: true
+    country_code: "US"
+
+  # ===========================================================================
+  # LONDON — GRE TUNNELS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # London HQ — Primary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "LON-HQ-01-GRE-PRIMARY"
+    state: present
+    comment: "London HQ Primary GRE Tunnel - EMEA"
+    location_name: "LON-HQ-01"
+    source_ip: "198.51.100.10"
+
+    # EU VIPs — within_country=true keeps traffic in UK/EU
+    # GDPR COMPLIANCE: EU traffic must stay within EU enforcement nodes
+    primary_dest_vip: "165.225.10.1"   # Zscaler EU VIP (London DC)
+    secondary_dest_vip: "165.225.10.2" # Zscaler EU VIP (Frankfurt DC)
+
+    # GDPR: Keep EU traffic within EU
+    within_country: false              # Allow EU-wide routing (not just UK)
+    ip_unnumbered: true
+    country_code: "GB"
+
+  # ---------------------------------------------------------------------------
+  # London HQ — Secondary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "LON-HQ-01-GRE-SECONDARY"
+    state: present
+    comment: "London HQ Secondary GRE Tunnel - EMEA Failover"
+    location_name: "LON-HQ-01"
+    source_ip: "198.51.100.11"
+    primary_dest_vip: "165.225.10.3"
+    secondary_dest_vip: "165.225.10.4"
+    within_country: false
+    ip_unnumbered: true
+    country_code: "GB"
+
+  # ===========================================================================
+  # SINGAPORE — GRE TUNNELS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Singapore HQ — Primary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "SIN-HQ-01-GRE-PRIMARY"
+    state: present
+    comment: "Singapore HQ Primary GRE Tunnel - APAC"
+    location_name: "SIN-HQ-01"
+    source_ip: "192.0.2.10"
+
+    # APAC VIPs
+    primary_dest_vip: "165.225.20.1"   # Zscaler APAC VIP (Singapore DC)
+    secondary_dest_vip: "165.225.20.2" # Zscaler APAC VIP (Tokyo DC)
+
+    within_country: false              # Allow APAC-wide routing
+    ip_unnumbered: true
+    country_code: "SG"
+
+  # ---------------------------------------------------------------------------
+  # Singapore HQ — Secondary GRE Tunnel
+  # ---------------------------------------------------------------------------
+  - name: "SIN-HQ-01-GRE-SECONDARY"
+    state: present
+    comment: "Singapore HQ Secondary GRE Tunnel - APAC Failover"
+    location_name: "SIN-HQ-01"
+    source_ip: "192.0.2.11"
+    primary_dest_vip: "165.225.20.3"
+    secondary_dest_vip: "165.225.20.4"
+    within_country: false
+    ip_unnumbered: true
+    country_code: "SG"
+
+  # ===========================================================================
+  # EXAMPLE: GRE TUNNEL WITH NUMBERED INTERFACE
+  # ===========================================================================
+  # Some network designs require numbered GRE tunnel interfaces.
+  # This example shows a numbered GRE tunnel configuration.
+  #
+  # - name: "NYC-DC-01-GRE-NUMBERED"
+  #   state: present
+  #   comment: "NYC DC Numbered GRE Tunnel"
+  #   location_name: "NYC-DC-01"
+  #   source_ip: "203.0.113.20"
+  #   primary_dest_vip: "165.225.0.5"
+  #   secondary_dest_vip: "165.225.0.6"
+  #   within_country: true
+  #   ip_unnumbered: false           # Numbered tunnel
+  #   internal_ip_range: "100.64.0.0/29"  # RFC 6598 shared address space
+  #   country_code: "US"
+
+  # ===========================================================================
+  # EXAMPLE: GRE TUNNEL PENDING DELETION
+  # ===========================================================================
+  # - name: "OLD-OFFICE-GRE-PRIMARY"
+  #   state: absent
+  #   comment: "Old office GRE tunnel - decommissioned"
+  #   source_ip: "203.0.113.200"
+  #   primary_dest_vip: "165.225.0.1"
+  #   secondary_dest_vip: "165.225.0.2"

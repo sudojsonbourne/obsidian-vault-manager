@@ -1,0 +1,94 @@
+# =============================================================================
+# block_malicious_domains.yml — Malicious Domain Blocking Playbook
+# =============================================================================
+# PURPOSE:
+#   Dedicated playbook for blocking malicious domains in ZIA.
+#   Can be triggered manually, via CI/CD, or by threat intelligence feeds.
+#
+# USAGE EXAMPLES:
+#   # Block domains from the default vars file:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml
+#
+#   # Dry run — see what would be blocked:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml --check
+#
+#   # Block specific domains via CLI (emergency response):
+#   ansible-playbook -i inventories/production block_malicious_domains.yml \
+#     --extra-vars "domains_to_block=['evil-ransomware.com','c2-server.net','phishing-site.org']"
+#
+#   # Block from a custom domains file:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml \
+#     --extra-vars "zia_domains_file=vars/domains/incident_response_domains.yml"
+#
+#   # Block on all tenants simultaneously:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml \
+#     --extra-vars "domains_to_block=['global-threat.com']"
+#
+#   # Block on specific tenant only:
+#   ansible-playbook -i inventories/production block_malicious_domains.yml \
+#     --limit zia_tenant_us_primary \
+#     --extra-vars "domains_to_block=['us-specific-threat.com']"
+#
+# INTEGRATION WITH THREAT INTELLIGENCE:
+#   This playbook can be called from external systems:
+#
+#   # From a SOAR platform (e.g., Splunk SOAR, Palo Alto XSOAR):
+#   ansible-playbook block_malicious_domains.yml \
+#     --extra-vars "domains_to_block={{ threat_intel_domains }}"
+#
+#   # From a cron job (daily threat feed update):
+#   0 6 * * * ansible-playbook -i inventories/production block_malicious_domains.yml
+#
+# DOMAIN INPUT FORMATS:
+#   Standard FQDN:  evil.com
+#   Subdomain:      malware.evil.com
+#   Wildcard:       *.evil.com  (blocks all subdomains)
+#
+# SAFE STATE MANAGEMENT:
+#   - Domains are ADDED to the existing block list (never replace)
+#   - Existing blocked domains are preserved
+#   - Duplicates are automatically removed
+#   - Invalid FQDNs are rejected before any API calls
+# =============================================================================
+
+---
+- name: "ZIA Malicious Domain Blocking"
+  hosts: zia_tenants
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: "BLOCK-DOMAINS | Print domain blocking banner"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║              ZIA MALICIOUS DOMAIN BLOCKING                          ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+          Environment:    {{ env | default('NOT SET') }}
+          Tenant:         {{ inventory_hostname }}
+          Check mode:     {{ ansible_check_mode }}
+          Domains file:   {{ zia_domains_file | default('vars/domains/malicious_domains.yml') }}
+          CLI domains:    {{ domains_to_block | default([]) | length }} domain(s) passed via CLI
+          ══════════════════════════════════════════════════════════════════════
+      tags:
+        - always
+
+  roles:
+    - role: common
+      tags: [always]
+    - role: zscaler_zia_domain_blocking
+      tags: [domains, security, block]
+
+  post_tasks:
+    - name: "BLOCK-DOMAINS | Print completion message"
+      ansible.builtin.debug:
+        msg: |
+          ✅ Domain blocking complete.
+          {% if ansible_check_mode %}
+          ⚠️  CHECK MODE: No changes were made. Review output above.
+          {% else %}
+          Domains have been added to the '{{ domain_block_category_name | default('MALICIOUS_DOMAINS') }}' category.
+          ZIA has been activated and blocks are now enforced.
+          {% endif %}
+      tags:
+        - always

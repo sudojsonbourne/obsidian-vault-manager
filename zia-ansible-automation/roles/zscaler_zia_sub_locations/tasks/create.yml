@@ -1,0 +1,51 @@
+# =============================================================================
+# roles/zscaler_zia_sub_locations/tasks/create.yml — Sub-Location Create/Update
+# =============================================================================
+# PURPOSE:
+#   Creates or updates a single ZIA sub-location.
+#   Uses the parent_location_id_map cached in validate.yml.
+# =============================================================================
+
+---
+- name: "SUB-CREATE | Log sub-location being processed"
+  ansible.builtin.debug:
+    msg: |
+      🏢 Processing sub-location: {{ sub_location_item.name }}
+         Parent: {{ sub_location_item.parent_name }}
+         Parent ID: {{ parent_location_id_map[sub_location_item.parent_name] | default('UNKNOWN') }}
+         IPs: {{ sub_location_item.ip_addresses | join(', ') }}
+  tags:
+    - create
+
+- name: "SUB-CREATE | Create or update sub-location: {{ sub_location_item.name }}"
+  zscaler.ziacloud.zia_location_management:
+    username: "{{ zia_username }}"
+    password: "{{ zia_password }}"
+    api_key: "{{ zia_api_key }}"
+    cloud: "{{ zia_cloud }}"
+    name: "{{ sub_location_item.name }}"
+    state: "{{ sub_location_item.state }}"
+    # Parent location ID — resolved dynamically from ZIA API in validate.yml
+    # This is the critical link between sub-location and parent
+    parent_id: "{{ parent_location_id_map[sub_location_item.parent_name] }}"
+    ip_addresses: "{{ sub_location_item.ip_addresses }}"
+    profile: "{{ sub_location_item.profile | default('CORPORATE') }}"
+    auth_required: "{{ sub_location_item.auth_required | default(true) }}"
+    ssl_scan_enabled: "{{ sub_location_item.ssl_scan_enabled | default(false) }}"
+    surrogate_ip: "{{ sub_location_item.surrogate_ip | default(false) }}"
+    xff_forward_enabled: "{{ sub_location_item.xff_forward_enabled | default(false) }}"
+    up_bandwidth: "{{ sub_location_item.up_bandwidth | default(0) }}"
+    dn_bandwidth: "{{ sub_location_item.dn_bandwidth | default(0) }}"
+    description: "{{ sub_location_item.description | default('Sub-location managed by Ansible') }}"
+  register: sub_location_result
+  retries: "{{ zia_api_max_retries }}"
+  delay: "{{ zia_api_retry_delay }}"
+  no_log: true
+  tags:
+    - create
+
+- name: "SUB-CREATE | Report result: {{ sub_location_item.name }}"
+  ansible.builtin.debug:
+    msg: "{{ '✅ CHANGED' if sub_location_result.changed else 'ℹ️  NO CHANGE' }}: {{ sub_location_item.name }}"
+  tags:
+    - create

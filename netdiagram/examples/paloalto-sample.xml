@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Palo Alto Networks Sample Configuration for NetDiagram testing -->
+<config>
+  <devices>
+    <entry name="localhost.localdomain">
+      <deviceconfig>
+        <system>
+          <hostname>PA-FW-EDGE-01</hostname>
+          <domain>corp.example.com</domain>
+        </system>
+      </deviceconfig>
+      <network>
+        <interface>
+          <ethernet>
+            <entry name="ethernet1/1">
+              <layer3>
+                <ip>
+                  <entry name="203.0.113.2/30"/>
+                </ip>
+              </layer3>
+              <comment>WAN - ISP Uplink</comment>
+            </entry>
+            <entry name="ethernet1/2">
+              <layer3>
+                <ip>
+                  <entry name="10.0.0.2/30"/>
+                </ip>
+              </layer3>
+              <comment>Link to Core Router</comment>
+            </entry>
+            <entry name="ethernet1/3">
+              <layer3>
+                <units>
+                  <entry name="ethernet1/3.100">
+                    <tag>100</tag>
+                    <ip>
+                      <entry name="172.16.0.254/24"/>
+                    </ip>
+                  </entry>
+                  <entry name="ethernet1/3.200">
+                    <tag>200</tag>
+                    <ip>
+                      <entry name="172.16.1.254/24"/>
+                    </ip>
+                  </entry>
+                </units>
+              </layer3>
+              <comment>DMZ Trunk</comment>
+            </entry>
+          </ethernet>
+          <loopback>
+            <units>
+              <entry name="loopback.1">
+                <ip>
+                  <entry name="192.168.255.2/32"/>
+                </ip>
+              </entry>
+            </units>
+          </loopback>
+        </interface>
+      </network>
+      <vsys>
+        <entry name="vsys1">
+          <zone>
+            <entry name="untrust">
+              <network>
+                <layer3>
+                  <member>ethernet1/1</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="trust">
+              <network>
+                <layer3>
+                  <member>ethernet1/2</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="dmz">
+              <network>
+                <layer3>
+                  <member>ethernet1/3.100</member>
+                  <member>ethernet1/3.200</member>
+                </layer3>
+              </network>
+            </entry>
+          </zone>
+        </entry>
+      </vsys>
+    </entry>
+  </devices>
+</config>

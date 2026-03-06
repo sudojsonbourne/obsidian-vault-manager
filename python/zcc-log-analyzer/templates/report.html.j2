@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZCC Log Analyzer Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:          #0f172a;
+      --bg-card:     #1e293b;
+      --bg-card2:    #263348;
+      --border:      #334155;
+      --text:        #e2e8f0;
+      --text-muted:  #94a3b8;
+      --accent:      #3b82f6;
+      --critical:    #dc2626;
+      --error:       #ea580c;
+      --warning:     #d97706;
+      --info:        #2563eb;
+      --success:     #16a34a;
+      --spike:       #f59e0b;
+      --new:         #dc2626;
+      --resolved:    #16a34a;
+      --increased:   #ea580c;
+      --decreased:   #2563eb;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px;
+      background: rgba(255,255,255,0.07);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────────── */
+    .container { max-width: 1400px; margin: 0 auto; padding: 0 24px 60px; }
+
+    /* ── Header ───────────────────────────────────────────────────────── */
+    .header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 28px 0 20px;
+      margin-bottom: 32px;
+    }
+    .header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .header-logo {
+      font-size: 28px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+    .header-logo span { color: var(--accent); }
+    .header-meta {
+      margin-left: auto;
+      text-align: right;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .header-meta strong { color: var(--text); }
+
+    /* ── Nav ──────────────────────────────────────────────────────────── */
+    .nav {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+    .nav a {
+      padding: 6px 14px;
+      border-radius: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .nav a:hover { background: var(--bg-card2); color: var(--text); text-decoration: none; }
+
+    /* ── Cards ────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title .icon { font-size: 18px; }
+
+    /* ── Summary Grid ─────────────────────────────────────────────────── */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat-card .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-critical .stat-value { color: var(--critical); }
+    .stat-error    .stat-value { color: var(--error); }
+    .stat-warning  .stat-value { color: var(--warning); }
+    .stat-info     .stat-value { color: var(--info); }
+    .stat-total    .stat-value { color: #fff; }
+    .stat-spike    .stat-value { color: var(--spike); }
+
+    /* ── Badges ───────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge-critical { background: rgba(220,38,38,0.2);  color: #fca5a5; border: 1px solid rgba(220,38,38,0.4); }
+    .badge-error    { background: rgba(234,88,12,0.2);  color: #fdba74; border: 1px solid rgba(234,88,12,0.4); }
+    .badge-warning  { background: rgba(217,119,6,0.2);  color: #fcd34d; border: 1px solid rgba(217,119,6,0.4); }
+    .badge-info     { background: rgba(37,99,235,0.2);  color: #93c5fd; border: 1px solid rgba(37,99,235,0.4); }
+    .badge-debug    { background: rgba(107,114,128,0.2);color: #9ca3af; border: 1px solid rgba(107,114,128,0.4); }
+
+    /* ── Spike Alert ──────────────────────────────────────────────────── */
+    .spike-alert {
+      background: rgba(245,158,11,0.1);
+      border: 1px solid rgba(245,158,11,0.4);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+    .spike-alert-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--spike);
+      margin-bottom: 12px;
+    }
+    .spike-row {
+      background: rgba(245,158,11,0.07);
+      border: 1px solid rgba(245,158,11,0.2);
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      display: grid;
+      grid-template-columns: 200px 80px 70px 120px 1fr;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+    }
+    .spike-row:last-child { margin-bottom: 0; }
+    .spike-time { color: var(--spike); font-weight: 600; font-family: monospace; }
+    .spike-count { font-weight: 700; font-size: 16px; }
+    .spike-ratio { color: var(--text-muted); }
+
+    /* ── Chart ────────────────────────────────────────────────────────── */
+    .chart-container {
+      position: relative;
+      height: 220px;
+      margin-top: 8px;
+    }
+
+    /* ── Tables ───────────────────────────────────────────────────────── */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .data-table th {
+      text-align: left;
+      padding: 10px 12px;
+      background: var(--bg-card2);
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .data-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(51,65,85,0.5);
+      vertical-align: top;
+    }
+    .data-table tr:hover td { background: rgba(255,255,255,0.03); }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .data-table .mono { font-family: monospace; font-size: 12px; }
+    .data-table .muted { color: var(--text-muted); }
+
+    /* Scrollable table wrapper */
+    .table-scroll {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 600px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    /* ── Event Log ────────────────────────────────────────────────────── */
+    .event-row-critical { border-left: 3px solid var(--critical); }
+    .event-row-error    { border-left: 3px solid var(--error); }
+    .event-row-warning  { border-left: 3px solid var(--warning); }
+    .event-row-info     { border-left: 3px solid var(--info); }
+
+    /* ── Diff Section ─────────────────────────────────────────────────── */
+    .diff-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 900px) { .diff-grid { grid-template-columns: 1fr; } }
+
+    .diff-card {
+      border-radius: 8px;
+      padding: 16px;
+      border: 1px solid;
+    }
+    .diff-card-new      { background: rgba(220,38,38,0.08);  border-color: rgba(220,38,38,0.3); }
+    .diff-card-resolved { background: rgba(22,163,74,0.08);  border-color: rgba(22,163,74,0.3); }
+    .diff-card-inc      { background: rgba(234,88,12,0.08);  border-color: rgba(234,88,12,0.3); }
+    .diff-card-dec      { background: rgba(37,99,235,0.08);  border-color: rgba(37,99,235,0.3); }
+
+    .diff-card-title {
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .diff-new      .diff-card-title { color: #fca5a5; }
+    .diff-resolved .diff-card-title { color: #86efac; }
+    .diff-inc      .diff-card-title { color: #fdba74; }
+    .diff-dec      .diff-card-title { color: #93c5fd; }
+
+    .diff-item {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .diff-item:last-child { border-bottom: none; }
+    .diff-item-code { font-family: monospace; color: var(--text); }
+    .diff-item-count { color: var(--text-muted); white-space: nowrap; }
+
+    /* ── Rate comparison bars ─────────────────────────────────────────── */
+    .rate-bar-container { margin-top: 8px; }
+    .rate-bar-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .rate-bar-track {
+      height: 8px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .rate-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .rate-bar-baseline { background: var(--info); }
+    .rate-bar-incident { background: var(--error); }
+
+    /* ── File breakdown ───────────────────────────────────────────────── */
+    .file-bar {
+      display: flex;
+      height: 6px;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .file-bar-critical { background: var(--critical); }
+    .file-bar-error    { background: var(--error); }
+    .file-bar-warning  { background: var(--warning); }
+    .file-bar-info     { background: var(--info); }
+
+    /* ── Warnings box ─────────────────────────────────────────────────── */
+    .warn-box {
+      background: rgba(217,119,6,0.1);
+      border: 1px solid rgba(217,119,6,0.3);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 13px;
+    }
+    .warn-box-title { color: var(--warning); font-weight: 600; margin-bottom: 6px; }
+
+    /* ── Section headings ─────────────────────────────────────────────── */
+    .section-heading {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      margin: 36px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ── Filter bar ───────────────────────────────────────────────────── */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-bar input[type="text"] {
+      background: var(--bg-card2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 12px;
+      font-size: 13px;
+      width: 260px;
+    }
+    .filter-bar input[type="text"]::placeholder { color: var(--text-muted); }
+    .filter-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-card2);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover, .filter-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .filter-btn.active-critical { background: var(--critical); border-color: var(--critical); color: #fff; }
+    .filter-btn.active-error    { background: var(--error);    border-color: var(--error);    color: #fff; }
+    .filter-btn.active-warning  { background: var(--warning);  border-color: var(--warning);  color: #fff; }
+
+    /* ── Tooltip ──────────────────────────────────────────────────────── */
+    [title] { cursor: help; }
+
+    /* ── Responsive ───────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .spike-row { grid-template-columns: 1fr 1fr; }
+      .summary-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- HEADER                                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="header">
+  <div class="header-inner">
+    <div class="header-logo">ZCC <span>Log Analyzer</span></div>
+    <div class="header-meta">
+      <div><strong>{{ source_path | e }}</strong></div>
+      {% if baseline_source_path %}
+      <div>Baseline: <strong>{{ baseline_source_path | e }}</strong></div>
+      {% endif %}
+      <div>Generated: {{ generated_at }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Navigation -->
+  <nav class="nav">
+    <a href="#summary">📊 Summary</a>
+    {% if spike_windows %}<a href="#spikes">⚡ Spikes ({{ spike_windows | length }})</a>{% endif %}
+    <a href="#timeline">📈 Timeline</a>
+    <a href="#frequency">🔢 Error Codes</a>
+    <a href="#events">📋 Event Log</a>
+    <a href="#files">📁 Log Files</a>
+    {% if baseline_diff %}<a href="#baseline">🔍 Baseline Diff</a>{% endif %}
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- EXTRACTION WARNINGS                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  {% if extraction_errors %}
+  <div class="warn-box">
+    <div class="warn-box-title">⚠ Extraction Warnings</div>
+    {% for err in extraction_errors %}
+    <div>{{ err | e }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SUMMARY                                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <div id="summary">
+    <div class="section-heading"><span>📊</span> Executive Summary</div>
+
+    <div class="summary-grid">
+      <div class="stat-card stat-total">
+        <div class="stat-value">{{ timeline.total_events }}</div>
+        <div class="stat-label">Total Events</div>
+      </div>
+      <div class="stat-card stat-critical">
+        <div class="stat-value">{{ timeline.severity_summary.get('CRITICAL', 0) }}</div>
+        <div class="stat-label">Critical</div>
+      </div>
+      <div class="stat-card stat-error">
+        <div class="stat-value">{{ timeline.severity_summary.get('ERROR', 0) }}</div>
+        <div class="stat-label">Errors</div>
+      </div>
+      <div class="stat-card stat-warning">
+        <div class="stat-value">{{ timeline.severity_summary.get('WARNING', 0) }}</div>
+        <div class="stat-label">Warnings</div>
+      </div>
+      <div class="stat-card stat-info">
+        <div class="stat-value">{{ timeline.severity_summary.get('INFO', 0) }}</div>
+        <div class="stat-label">Info</div>
+      </div>
+      {% if spike_windows %}
+      <div class="stat-card stat-spike">
+        <div class="stat-value">{{ spike_windows | length }}</div>
+        <div class="stat-label">⚡ Spikes</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:16px; font-size:13px;">
+        {% if timeline.time_range_start %}
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:4px;">Time Range</div>
+          <div>{{ timeline.time_range_start | format_ts }}</div>
+          <div style="color:var(--text-muted)">→ {{ timeline.time_range_end | format_ts }}</div>
+        </div>
+        {% endif %}
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:4px;">Duration</div>
+          <div>{{ format_duration(timeline.duration_minutes) }}</div>
+        </div>
+        {% if timeline.events_per_minute %}
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:4px;">Event Rate</div>
+          <div>{{ "%.1f"|format(timeline.events_per_minute) }} events/min</div>
+        </div>
+        {% endif %}
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:4px;">Spike Window</div>
+          <div>{{ timeline.window_minutes }} min / {{ timeline.spike_threshold_multiplier }}x avg</div>
+        </div>
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:4px;">Unique Error Codes</div>
+          <div>{{ timeline.top_error_codes | length }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SPIKE WINDOWS                                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  {% if spike_windows %}
+  <div id="spikes">
+    <div class="section-heading"><span>⚡</span> Activity Spike Windows</div>
+    <div class="spike-alert">
+      <div class="spike-alert-title">
+        ⚡ {{ spike_windows | length }} spike window(s) detected —
+        threshold: {{ timeline.spike_min_count }} events or {{ timeline.spike_threshold_multiplier }}x average
+        per {{ timeline.window_minutes }}-minute window
+      </div>
+      {% for sw in spike_windows %}
+      <div class="spike-row">
+        <div class="spike-time">{{ sw.label }}</div>
+        <div class="spike-count">{{ sw.count }} events</div>
+        <div class="spike-ratio">{{ "%.1f"|format(sw.spike_ratio) }}x avg</div>
+        <div>
+          <span class="badge badge-{{ sw.max_severity | lower }}">{{ sw.max_severity }}</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted);">
+          <div>Files: {{ sw.source_files[:4] | join(", ") }}{% if sw.source_files | length > 4 %} +{{ sw.source_files | length - 4 }} more{% endif %}</div>
+          <div>Categories: {% for cat, cnt in sw.top_categories[:3] %}{{ cat }}({{ cnt }}){% if not loop.last %}, {% endif %}{% endfor %}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- TIMELINE CHART                                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <div id="timeline">
+    <div class="section-heading"><span>📈</span> Event Timeline</div>
+    <div class="card">
+      <div class="card-title">
+        <span class="icon">📈</span>
+        Events per {{ timeline.window_minutes }}-Minute Window
+        <span style="font-size:12px; font-weight:400; color:var(--text-muted); margin-left:8px;">
+          (yellow bars = spike windows)
+        </span>
+      </div>
+      <div class="chart-container">
+        <canvas id="timelineChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ERROR CODE FREQUENCY                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <div id="frequency">
+    <div class="section-heading"><span>🔢</span> Error Code Frequency</div>
+    <div class="card">
+      <div class="filter-bar">
+        <input type="text" id="freqSearch" placeholder="Search codes, categories, messages…" oninput="filterFreqTable()" />
+        <span style="color:var(--text-muted); font-size:12px;">{{ code_freq | length }} unique codes</span>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="freqTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Code</th>
+              <th>Category</th>
+              <th class="num">Count</th>
+              <th>Severity</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in code_freq %}
+            {% if not item.code.startswith('UNMATCHED_') %}
+            <tr data-search="{{ item.code | lower }} {{ item.category | lower }} {{ item.message | lower }}">
+              <td class="muted">{{ loop.index }}</td>
+              <td><code>{{ item.code | e }}</code></td>
+              <td class="muted">{{ item.category | e }}</td>
+              <td class="num"><strong>{{ item.count }}</strong></td>
+              <td><span class="badge badge-{{ item.severity | lower }}">{{ item.severity }}</span></td>
+              <td style="max-width:400px;">{{ item.message | truncate_msg(80) | e }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- CHRONOLOGICAL EVENT LOG                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <div id="events">
+    <div class="section-heading"><span>📋</span> Chronological Event Log</div>
+    <div class="card">
+      <div class="filter-bar">
+        <input type="text" id="eventSearch" placeholder="Search events…" oninput="filterEventTable()" />
+        <button class="filter-btn" onclick="filterBySev('ALL')" id="btn-ALL">All</button>
+        <button class="filter-btn" onclick="filterBySev('CRITICAL')" id="btn-CRITICAL">Critical</button>
+        <button class="filter-btn" onclick="filterBySev('ERROR')" id="btn-ERROR">Error</button>
+        <button class="filter-btn" onclick="filterBySev('WARNING')" id="btn-WARNING">Warning</button>
+        <span style="color:var(--text-muted); font-size:12px; margin-left:auto;">
+          Showing {{ display_events | length }} of {{ timeline.total_events }} events
+          {% if timeline.total_events > display_events | length %}
+          (filtered to WARNING+)
+          {% endif %}
+        </span>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="eventTable">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Sev</th>
+              <th>Source File</th>
+              <th>Code</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in display_events %}
+            <tr class="event-row-{{ ev.severity | lower }}"
+                data-sev="{{ ev.severity }}"
+                data-search="{{ ev.source_file | lower }} {{ ev.matched_code | lower }} {{ ev.message | lower }}">
+              <td class="mono muted" style="white-space:nowrap;">
+                {% if ev.timestamp %}{{ ev.timestamp | format_ts }}{% else %}{{ ev.timestamp_raw | e }}{% endif %}
+              </td>
+              <td><span class="badge badge-{{ ev.severity | lower }}">{{ ev.severity[:4] }}</span></td>
+              <td class="muted mono" style="white-space:nowrap;">{{ ev.source_file | e }}</td>
+              <td>
+                {% if ev.matched_code %}
+                <code title="{{ ev.matched_message | e }}">{{ ev.matched_code | e }}</code>
+                {% else %}
+                <span class="muted">—</span>
+                {% endif %}
+              </td>
+              <td style="max-width:500px; word-break:break-word;">{{ ev.message | truncate_msg(120) | e }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PER-FILE BREAKDOWN                                                   -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <div id="files">
+    <div class="section-heading"><span>📁</span> Log File Breakdown</div>
+    <div class="card">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Log File</th>
+              <th>Type</th>
+              <th class="num">Total</th>
+              <th class="num">Critical</th>
+              <th class="num">Error</th>
+              <th class="num">Warning</th>
+              <th class="num">Info</th>
+              <th>Distribution</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in file_breakdown %}
+            <tr>
+              <td class="mono">{{ f.name | e }}</td>
+              <td class="muted">{{ f.log_type | e }}</td>
+              <td class="num"><strong>{{ f.total }}</strong></td>
+              <td class="num" style="color:var(--critical);">{{ f.critical }}</td>
+              <td class="num" style="color:var(--error);">{{ f.error }}</td>
+              <td class="num" style="color:var(--warning);">{{ f.warning }}</td>
+              <td class="num" style="color:var(--info);">{{ f.info }}</td>
+              <td style="min-width:120px;">
+                {% if f.total > 0 %}
+                <div class="file-bar">
+                  <div class="file-bar-critical" style="width:{{ (f.critical / f.total * 100) | int }}%"></div>
+                  <div class="file-bar-error"    style="width:{{ (f.error    / f.total * 100) | int }}%"></div>
+                  <div class="file-bar-warning"  style="width:{{ (f.warning  / f.total * 100) | int }}%"></div>
+                  <div class="file-bar-info"     style="width:{{ (f.info     / f.total * 100) | int }}%"></div>
+                </div>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- BASELINE DIFF                                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  {% if baseline_diff %}
+  <div id="baseline">
+    <div class="section-heading"><span>🔍</span> Baseline Comparison</div>
+
+    <!-- Rate comparison -->
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title"><span class="icon">📊</span> Event Rate Comparison</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; font-size:13px;">
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:6px;">Baseline Events</div>
+          <div style="font-size:24px; font-weight:700; color:var(--info);">{{ baseline_diff.baseline_total_events }}</div>
+          {% if baseline_diff.baseline_events_per_minute %}
+          <div style="color:var(--text-muted);">{{ "%.1f"|format(baseline_diff.baseline_events_per_minute) }} /min</div>
+          {% endif %}
+        </div>
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:6px;">Incident Events</div>
+          <div style="font-size:24px; font-weight:700; color:var(--error);">{{ baseline_diff.incident_total_events }}</div>
+          {% if baseline_diff.incident_events_per_minute %}
+          <div style="color:var(--text-muted);">{{ "%.1f"|format(baseline_diff.incident_events_per_minute) }} /min</div>
+          {% endif %}
+        </div>
+        <div>
+          <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; margin-bottom:6px;">Rate Change</div>
+          {% if baseline_diff.rate_change_pct is not none %}
+          {% set pct = baseline_diff.rate_change_pct %}
+          <div style="font-size:24px; font-weight:700; color:{% if pct > 0 %}var(--error){% else %}var(--success){% endif %};">
+            {% if pct > 0 %}+{% endif %}{{ "%.1f"|format(pct) }}%
+          </div>
+          {% else %}
+          <div style="color:var(--text-muted);">N/A</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Diff summary cards -->
+    <div class="diff-grid">
+      <!-- New errors -->
+      <div class="diff-card diff-card-new diff-new">
+        <div class="diff-card-title">🆕 New Errors ({{ baseline_diff.new_codes | length }})</div>
+        {% for e in baseline_diff.new_codes[:15] %}
+        <div class="diff-item">
+          <div>
+            <div class="diff-item-code">{{ e.code | e }}</div>
+            <div style="color:var(--text-muted); font-size:11px;">{{ e.message | truncate_msg(60) | e }}</div>
+          </div>
+          <div class="diff-item-count">
+            <span class="badge badge-{{ e.severity | lower }}">{{ e.severity[:4] }}</span>
+            <span style="margin-left:4px;">{{ e.incident_count }}x</span>
+          </div>
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted); font-size:12px;">No new errors ✓</div>
+        {% endfor %}
+      </div>
+
+      <!-- Resolved errors -->
+      <div class="diff-card diff-card-resolved diff-resolved">
+        <div class="diff-card-title">✅ Resolved ({{ baseline_diff.resolved_codes | length }})</div>
+        {% for e in baseline_diff.resolved_codes[:15] %}
+        <div class="diff-item">
+          <div>
+            <div class="diff-item-code">{{ e.code | e }}</div>
+            <div style="color:var(--text-muted); font-size:11px;">{{ e.message | truncate_msg(60) | e }}</div>
+          </div>
+          <div class="diff-item-count">was {{ e.baseline_count }}x</div>
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted); font-size:12px;">No resolved errors</div>
+        {% endfor %}
+      </div>
+
+      <!-- Increased -->
+      <div class="diff-card diff-card-inc diff-inc">
+        <div class="diff-card-title">⬆ Increased Frequency ({{ baseline_diff.increased_codes | length }})</div>
+        {% for e in baseline_diff.increased_codes[:15] %}
+        <div class="diff-item">
+          <div>
+            <div class="diff-item-code">{{ e.code | e }}</div>
+            <div style="color:var(--text-muted); font-size:11px;">{{ e.message | truncate_msg(60) | e }}</div>
+          </div>
+          <div class="diff-item-count">{{ e.baseline_count }} → {{ e.incident_count }} ({{ e.change_label }})</div>
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted); font-size:12px;">No increased errors ✓</div>
+        {% endfor %}
+      </div>
+
+      <!-- Decreased -->
+      <div class="diff-card diff-card-dec diff-dec">
+        <div class="diff-card-title">⬇ Decreased Frequency ({{ baseline_diff.decreased_codes | length }})</div>
+        {% for e in baseline_diff.decreased_codes[:15] %}
+        <div class="diff-item">
+          <div>
+            <div class="diff-item-code">{{ e.code | e }}</div>
+            <div style="color:var(--text-muted); font-size:11px;">{{ e.message | truncate_msg(60) | e }}</div>
+          </div>
+          <div class="diff-item-count">{{ e.baseline_count }} → {{ e.incident_count }} ({{ e.change_label }})</div>
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted); font-size:12px;">No decreased errors</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- File diff -->
+    {% if baseline_diff.new_log_files or baseline_diff.missing_log_files %}
+    <div class="card">
+      <div class="card-title"><span class="icon">📁</span> Log File Differences</div>
+      {% if baseline_diff.new_log_files %}
+      <div style="margin-bottom:12px;">
+        <div style="color:#fca5a5; font-weight:600; margin-bottom:6px;">New files in incident:</div>
+        {% for f in baseline_diff.new_log_files %}
+        <code style="display:inline-block; margin:2px 4px 2px 0;">{{ f | e }}</code>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if baseline_diff.missing_log_files %}
+      <div>
+        <div style="color:#86efac; font-weight:600; margin-bottom:6px;">Files only in baseline (missing from incident):</div>
+        {% for f in baseline_diff.missing_log_files %}
+        <code style="display:inline-block; margin:2px 4px 2px 0;">{{ f | e }}</code>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Full diff table -->
+    <div class="card">
+      <div class="card-title"><span class="icon">📋</span> Full Diff Table</div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Change</th>
+              <th>Code</th>
+              <th>Category</th>
+              <th class="num">Baseline</th>
+              <th class="num">Incident</th>
+              <th>Severity</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in baseline_diff.all_entries %}
+            {% if e.change_type != 'unchanged' %}
+            <tr>
+              <td>
+                <span style="font-weight:600; color:
+                  {% if e.change_type == 'new' %}var(--critical)
+                  {% elif e.change_type == 'resolved' %}var(--success)
+                  {% elif e.change_type == 'increased' %}var(--error)
+                  {% else %}var(--info){% endif %};">
+                  {{ e.change_label }}
+                </span>
+              </td>
+              <td><code>{{ e.code | e }}</code></td>
+              <td class="muted">{{ e.category | e }}</td>
+              <td class="num">{{ e.baseline_count }}</td>
+              <td class="num"><strong>{{ e.incident_count }}</strong></td>
+              <td><span class="badge badge-{{ e.severity | lower }}">{{ e.severity[:4] }}</span></td>
+              <td style="max-width:300px;">{{ e.message | truncate_msg(70) | e }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div><!-- /container -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SCRIPTS                                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<script>
+// ── Chart.js Timeline ────────────────────────────────────────────────────
+(function() {
+  const raw = {{ chart_data_json }};
+  if (!raw.labels || raw.labels.length === 0) return;
+
+  const ctx = document.getElementById('timelineChart');
+  if (!ctx) return;
+
+  const bgColors = raw.spike_flags.map(isSpike =>
+    isSpike ? 'rgba(245,158,11,0.7)' : 'rgba(59,130,246,0.5)'
+  );
+  const borderColors = raw.spike_flags.map(isSpike =>
+    isSpike ? 'rgba(245,158,11,1)' : 'rgba(59,130,246,0.8)'
+  );
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: raw.labels,
+      datasets: [{
+        label: 'Events',
+        data: raw.counts,
+        backgroundColor: bgColors,
+        borderColor: borderColors,
+        borderWidth: 1,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items[0].label,
+            label: (item) => {
+              const isSpike = raw.spike_flags[item.dataIndex];
+              return `${item.raw} events${isSpike ? ' ⚡ SPIKE' : ''}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#64748b',
+            maxRotation: 45,
+            font: { size: 10 },
+            maxTicksLimit: 20,
+          },
+          grid: { color: 'rgba(51,65,85,0.5)' }
+        },
+        y: {
+          ticks: { color: '#64748b', font: { size: 11 } },
+          grid: { color: 'rgba(51,65,85,0.5)' },
+          beginAtZero: true,
+        }
+      }
+    }
+  });
+})();
+
+// ── Frequency table filter ────────────────────────────────────────────────
+function filterFreqTable() {
+  const q = document.getElementById('freqSearch').value.toLowerCase();
+  document.querySelectorAll('#freqTable tbody tr').forEach(row => {
+    const text = row.dataset.search || '';
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+// ── Event log filter ──────────────────────────────────────────────────────
+let activeSev = 'ALL';
+
+function filterBySev(sev) {
+  activeSev = sev;
+  // Update button styles
+  ['ALL','CRITICAL','ERROR','WARNING'].forEach(s => {
+    const btn = document.getElementById('btn-' + s);
+    if (!btn) return;
+    btn.className = 'filter-btn' + (s === sev ? ' active' : '');
+  });
+  applyEventFilter();
+}
+
+function filterEventTable() {
+  applyEventFilter();
+}
+
+function applyEventFilter() {
+  const q = document.getElementById('eventSearch').value.toLowerCase();
+  document.querySelectorAll('#eventTable tbody tr').forEach(row => {
+    const sev = row.dataset.sev || '';
+    const text = row.dataset.search || '';
+    const sevMatch = activeSev === 'ALL' || sev === activeSev;
+    const textMatch = !q || text.includes(q);
+    row.style.display = (sevMatch && textMatch) ? '' : 'none';
+  });
+}
+</script>
+
+</body>
+</html>

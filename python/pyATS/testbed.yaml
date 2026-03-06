@@ -1,0 +1,17 @@
+devices:
+  palo_alto_fw1:
+    os: panos                    # This tells pyATS to use PAN-OS drivers
+    type: firewall
+    connections:
+      cli:
+        protocol: ssh
+        ip: 192.168.100.30
+        port: 22
+    credentials:
+      default:
+        username: admin
+        password: palo123
+    custom:
+      # Optional: Add custom parameters for your environment
+      loopback: 10.0.0.3
+      ha_mode: active-passive
