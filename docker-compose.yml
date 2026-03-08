@@ -1,0 +1,55 @@
+services:
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: obsidian-syncthing
+    restart: unless-stopped
+    environment:
+      - PUID=1026
+      - PGID=100
+    volumes:
+      - /volume1/obsidian:/var/syncthing/obsidian
+      - syncthing-config:/var/syncthing/config
+    ports:
+      - "8384:8384"   # Web UI
+      - "22000:22000/tcp" # Sync protocol
+      - "22000:22000/udp"
+      - "21027:21027/udp" # Discovery
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8384/rest/noauth/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+    container_name: obsidian-mcp-server
+    restart: unless-stopped
+    volumes:
+      - /volume1/obsidian:/vaults
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-ui:
+    build:
+      context: ./web-ui
+    container_name: obsidian-web-ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - MCP_SERVER_URL=http://mcp-server:3001
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+
+volumes:
+  syncthing-config:
