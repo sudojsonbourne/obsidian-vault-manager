@@ -2,11 +2,12 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-RUN npm init -y && \
-    npm install @modelcontextprotocol/server-filesystem express
+COPY package.json .
+RUN npm install --production
 
 COPY server.js .
 
-EXPOSE 3001
+ENV PORT=3001
+EXPOSE ${PORT}
 
 CMD ["node", "server.js"]
