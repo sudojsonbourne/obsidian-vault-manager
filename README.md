@@ -19,7 +19,7 @@ Claude iOS / claude.ai  (your Max Plan)
 └────────────────────────────────────────────────┘
         │                    │
    mcp-audrey            mcp-taylor
-   /vaults/audrey-vault  /vaults/taylor-vault
+   /vault (audrey)       /vault (taylor)
         │                    │
   obsidian-sync-audrey   obsidian-sync-taylor
   (obsidian-headless)    (obsidian-headless)
@@ -40,6 +40,23 @@ Claude iOS / claude.ai  (your Max Plan)
 | `cloudflared` | Cloudflare Tunnel — exposes both MCP servers over HTTPS |
 
 > **No Mac-side services needed.** Native Obsidian Sync handles Mac and iPhone devices automatically.
+
+## Security Model
+
+The vault data is protected by several layers:
+
+- **Cloudflare Tunnel** — the MCP servers are not exposed to the public internet. Traffic routes through an encrypted Cloudflare Tunnel, which terminates TLS at the Cloudflare edge. No ports are opened on your router or firewall.
+- **Localhost-only ports** — MCP ports (3001, 3002) are bound to `127.0.0.1` on the NAS. They are not reachable from other devices on the LAN.
+- **Vault isolation** — each MCP container mounts only its own vault directory. Even if the path validation in `server.js` had a bug, one vault's MCP server cannot access the other vault's files.
+- **Path traversal protection** — all file paths are resolved and validated against the vault root before any filesystem operation. Requests that attempt to escape the vault directory are rejected.
+- **Non-root containers** — all containers (sync and MCP) run as `user: 1026:100`, matching the Synology NAS user. No container runs as root.
+- **Resource limits** — each container has memory and CPU limits to prevent a runaway process from starving other NAS services.
+- **Optional: Cloudflare Access** — for additional authentication, you can add Cloudflare Access policies that require email verification before allowing traffic through the tunnel (see [Cloudflare Access](#optional-cloudflare-access)).
+
+**Known limitations:**
+- The MCP endpoints have no application-level authentication. Security relies on the Cloudflare Tunnel being the only ingress path. Enabling Cloudflare Access is strongly recommended for production use.
+- Both vaults share a single Obsidian account/password. If per-vault credentials are needed, update `.env` and `docker-compose.yml` to use separate variables.
+- Obsidian credentials are passed as CLI arguments to `ob login`, which makes them visible in process listings (`ps aux`) inside the container.
 
 ## Prerequisites
 
@@ -63,7 +80,7 @@ sudo chmod 775 /volume1/obsidian
 sudo chmod 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
 ```
 
-> **Why this matters:** The MCP containers run as `user: "1026:100"` (matching your Synology NAS user) and mount `/volume1/obsidian` as `/vaults`. Both the parent directory and vault subdirectories must be readable and traversable by UID 1026 — otherwise MCP tool calls will fail with `EACCES: permission denied`. See [Troubleshooting → Permission denied](#permission-denied-eacces-from-mcp-tools) for details.
+> **Why this matters:** All containers run as `user: "1026:100"` (matching your Synology NAS user). Both the parent directory and vault subdirectories must be owned and traversable by UID 1026 — otherwise MCP tool calls and sync writes will fail with `EACCES: permission denied`. See [Troubleshooting → Permission denied](#permission-denied-eacces-from-mcp-tools) for details.
 
 ## 2. Obsidian Sync Setup
 
@@ -81,7 +98,7 @@ Edit `.env` and fill in:
 - `AUDREY_VAULT_NAME` / `TAYLOR_VAULT_NAME` — vault names exactly as they appear in Obsidian Sync (case-sensitive)
 - `ENCRYPTION_PASSWORD` — only if E2EE is enabled on the vaults (optional)
 
-> **That's it.** The `entrypoint.sh` in each sync container runs `ob login`, `ob sync-setup`, and `ob sync --continuous` automatically using these credentials. No manual CLI steps or token extraction required.
+> **That's it.** The `entrypoint.sh` in each sync container runs `ob login`, `ob sync-setup`, and `ob sync --continuous` automatically using these credentials. Login failures are retried up to 5 times with exponential backoff to avoid account lockout.
 
 ## 3. Cloudflare Tunnel Setup
 
@@ -127,21 +144,17 @@ For extra security, add Access policies under **Access → Applications**:
 - Add an Allow rule by email address
 - Users authenticate with a one-time email code
 
-> **Note:** Cloudflare Access may add an interstitial page that interferes with the MCP handshake. Test before relying on it. The tunnel URL alone is unguessable and not indexed.
+> **Note:** Cloudflare Access may add an interstitial page that interferes with the MCP handshake. Test before relying on it. Consider using [Service Auth tokens](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) as an alternative that works cleanly with programmatic clients.
 
 ## 4. Deploy
 
 ```bash
 # Clone to your NAS
 cd /volume1/docker
-git clone https://github.com/sudojsonbourne/obsidian-vault-manager.git
+git clone https://github.com/youruser/obsidian-vault-manager.git
 cd obsidian-vault-manager
 
-# Create vault directories with correct ownership and permissions
-sudo mkdir -p /volume1/obsidian/{audrey-vault,taylor-vault}
-sudo chown -R 1026:100 /volume1/obsidian
-sudo chmod 775 /volume1/obsidian
-sudo chmod 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
+# Ensure NAS directories exist with correct permissions (see Step 1)
 
 # Copy and fill in environment variables (see Step 2)
 cp .env.example .env
@@ -161,14 +174,14 @@ sudo docker logs obsidian-sync-taylor --tail 20
 sudo docker logs obsidian-cloudflared --tail 10
 # Look for: "INF Connection established"
 
-# Test health endpoints
+# Test health endpoints (localhost only)
 curl http://localhost:3001/health
 curl http://localhost:3002/health
 ```
 
 > **Private repo?** If the GitHub repo is private, use a [personal access token](https://github.com/settings/tokens) in the clone URL:
 > ```bash
-> git clone https://<your-token>@github.com/sudojsonbourne/obsidian-vault-manager.git
+> git clone https://<your-token>@github.com/youruser/obsidian-vault-manager.git
 > ```
 
 ## 5. Register Connectors in Claude
@@ -212,8 +225,8 @@ All paths are relative to the vault root. Path traversal is blocked.
 
 | Port | Service | Purpose |
 |------|---------|---------|
-| 3001 | mcp-audrey | Audrey's MCP server |
-| 3002 | mcp-taylor | Taylor's MCP server |
+| 3001 | mcp-audrey | Audrey's MCP server (localhost only) |
+| 3002 | mcp-taylor | Taylor's MCP server (localhost only) |
 
 ## Testing Locally
 
@@ -236,6 +249,43 @@ npx @modelcontextprotocol/inspector
 | `TAYLOR_VAULT_NAME` | Taylor's vault name in Obsidian Sync |
 | `ENCRYPTION_PASSWORD` | Vault E2EE password (optional) |
 
+## Updating
+
+To pull changes and redeploy:
+
+```bash
+cd /volume1/docker/obsidian-vault-manager
+git pull
+sudo docker compose up -d --build
+```
+
+Docker will rebuild only the images that changed. Vault data on the NAS is unaffected.
+
+## Backup
+
+The `delete_file` MCP tool is irreversible, and sync bugs could propagate deletions. Protect your vault data with one of these approaches:
+
+- **Btrfs snapshots** (recommended for DS920+): Enable scheduled snapshots on the `/volume1/obsidian` shared folder via DSM → Snapshot Replication. Snapshots are instant and space-efficient.
+- **Hyper Backup**: Schedule daily backups of `/volume1/obsidian` to an external drive or cloud target.
+- **Obsidian Sync version history**: Obsidian Sync retains file version history (up to 12 months on Plus plans), which can recover individual file deletions from the Obsidian app.
+
+## Teardown
+
+To stop and remove all containers:
+
+```bash
+cd /volume1/docker/obsidian-vault-manager
+sudo docker compose down
+```
+
+This stops containers and removes the Docker network. Vault data in `/volume1/obsidian/` is **not** deleted.
+
+To fully clean up:
+1. Delete the tunnel in Cloudflare Zero Trust → Networks → Tunnels
+2. Remove DNS CNAME records for the MCP hostnames
+3. Remove connectors from claude.ai → Settings → Connectors
+4. Optionally remove vault data: `sudo rm -rf /volume1/obsidian`
+
 ## Troubleshooting
 
 ### Sync container won't start / restart loop
@@ -244,7 +294,7 @@ npx @modelcontextprotocol/inspector
 sudo docker logs obsidian-sync-audrey --tail 30
 ```
 - `OBSIDIAN_EMAIL is required` → check `.env` has the credential variables set
-- Login failure → verify email/password, check if MFA is required on the account
+- `Login failed after 5 attempts` → verify email/password, check if MFA is required on the account
 - Vault not found → run `ob sync-list-remote` locally to confirm the vault name
 
 ### MCP servers won't start
@@ -275,13 +325,9 @@ Look for `INF Connection established` — this confirms the tunnel is connected.
 
 ### Permission denied (EACCES) from MCP tools
 
-If Claude discovers your vault tools but tool execution fails with `EACCES: permission denied, scandir '/vaults/audrey-vault'`, the MCP container can't read the vault files on disk.
+If Claude discovers your vault tools but tool execution fails with `EACCES: permission denied, scandir '/vault'`, the MCP container can't read the vault files on disk.
 
-The MCP containers run as `user: "1026:100"` (set in `docker-compose.yml`) to match the default Synology NAS user. They mount the host path `/volume1/obsidian` as `/vaults` inside the container. Two things must be true for this to work:
-
-1. **The parent directory `/volume1/obsidian` must be traversable** — the container process needs read+execute on the parent to reach the vault subdirectories. Without this, `scandir` fails even if the subdirectories have correct permissions.
-
-2. **The vault directories must be owned by 1026:100** — the sync containers write files as root, but the MCP containers read them as UID 1026.
+All containers run as `user: "1026:100"` (set in `docker-compose.yml`) to match the default Synology NAS user. They mount the vault directory as `/vault` inside the container. The vault directories must be owned by 1026:100.
 
 **Fix:**
 ```bash
@@ -298,8 +344,7 @@ sudo docker exec obsidian-mcp-audrey id
 # Expected: uid=1026 gid=100(users)
 
 # Confirm the vault is readable
-sudo docker exec obsidian-mcp-audrey ls -la /vaults/
-sudo docker exec obsidian-mcp-audrey ls -la /vaults/audrey-vault/
+sudo docker exec obsidian-mcp-audrey ls -la /vault/
 ```
 
 > **Synology ACL note:** Synology DSM uses POSIX ACLs that can override standard Unix permissions. If `chown`/`chmod` alone doesn't fix it, the ACLs may be blocking access. Running `chmod` on Synology typically resets the ACLs to match, but if issues persist, check ACLs via DSM → Control Panel → Shared Folder → Permissions.

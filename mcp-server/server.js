@@ -20,9 +20,8 @@ const VAULT_ROOT = path.resolve(VAULT_PATH);
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function resolveAndValidate(filePath) {
-  const normalized = path.normalize(filePath).replace(/^(\.\.[/\\])+/, "");
-  const full = path.resolve(VAULT_ROOT, normalized);
-  if (!full.startsWith(VAULT_ROOT)) {
+  const full = path.resolve(VAULT_ROOT, filePath);
+  if (full !== VAULT_ROOT && !full.startsWith(VAULT_ROOT + path.sep)) {
     throw new Error("Path traversal detected — access denied");
   }
   return full;
