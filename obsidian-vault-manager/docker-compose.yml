@@ -3,12 +3,11 @@ services:
     image: syncthing/syncthing:latest
     container_name: obsidian-syncthing
     restart: unless-stopped
-    environment:
-      - PUID=1026
-      - PGID=100
+    user: "1026:100"
     volumes:
-      - /volume1/obsidian:/var/syncthing/obsidian
-      - syncthing-config:/var/syncthing/config
+      - /volume1/obsidian/audrey-vault:/var/syncthing/obsidian/audrey-vault
+      - /volume1/obsidian/taylor-vault:/var/syncthing/obsidian/taylor-vault
+      - /volume1/obsidian/.syncthing-config:/var/syncthing/config
     ports:
       - "8384:8384"   # Web UI
       - "22000:22000/tcp" # Sync protocol
@@ -68,6 +67,9 @@ services:
         condition: service_healthy
       mcp-taylor:
         condition: service_healthy
-
-volumes:
-  syncthing-config:
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

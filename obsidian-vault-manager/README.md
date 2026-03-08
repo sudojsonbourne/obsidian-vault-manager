@@ -21,17 +21,30 @@ Claude iOS / claude.ai  (your Max Plan)
    mcp-audrey            mcp-taylor
    /vaults/audrey-vault  /vaults/taylor-vault
         │                    │
-  /volume1/obsidian  (Syncthing ↔ Mac ~/Documents)
+  /volume1/obsidian  (Syncthing ↔ Mac ~/Vaults)
+                              │
+                     vault-bridge (fswatch + rsync)
+                              │
+                     Mac ~/Documents ↔ iCloud ↔ iPhone
 ```
 
-**Services:**
+**Services (NAS):**
 
 | Container | Purpose |
 |-----------|---------|
-| `syncthing` | Bidirectional sync between NAS and Mac |
+| `syncthing` | Bidirectional sync between NAS and Mac `~/Vaults` |
 | `mcp-audrey` | MCP server scoped to Audrey's vault |
 | `mcp-taylor` | MCP server scoped to Taylor's vault |
 | `cloudflared` | Cloudflare Tunnel — exposes both MCP servers over HTTPS |
+
+**Services (Mac):**
+
+| Service | Purpose |
+|---------|---------|
+| `syncthing` | Bidirectional sync between NAS and `~/Vaults` |
+| `vault-bridge` | Bridges `~/Vaults` ↔ `~/Documents` via fswatch + rsync |
+
+> **Why the bridge?** macOS iCloud Drive manages `~/Documents` using NSFileCoordinator file locks. Running Syncthing directly into `~/Documents` causes `EDEADLK` (resource deadlock) errors. The bridge separates the two sync systems — Syncthing writes to `~/Vaults` (not iCloud-managed), and the bridge rsyncs changes into `~/Documents` for iCloud pickup.
 
 ## Prerequisites
 
@@ -39,13 +52,23 @@ Claude iOS / claude.ai  (your Max Plan)
 - A domain managed by Cloudflare DNS (free tier works)
 - A Cloudflare account (free)
 - Claude Pro or Max subscription
+- A Mac with Homebrew (acts as the iCloud bridge)
 
 ## 1. NAS Folder Setup
 
 ```bash
-# SSH into your NAS or use File Station
+# SSH into your NAS
 mkdir -p /volume1/obsidian/audrey-vault
 mkdir -p /volume1/obsidian/taylor-vault
+mkdir -p /volume1/obsidian/.syncthing-config
+
+# Set ownership and permissions so the Syncthing container (UID 1026) can write.
+# Synology DSM may apply restrictive defaults that block Docker bind mounts —
+# both chown and chmod are required.
+sudo chown -R 1026:100 /volume1/obsidian
+sudo chmod -R 770 /volume1/obsidian/audrey-vault
+sudo chmod -R 770 /volume1/obsidian/taylor-vault
+sudo chmod -R 700 /volume1/obsidian/.syncthing-config
 ```
 
 ## 2. Syncthing Setup (Mac Side)
@@ -58,11 +81,52 @@ brew services start syncthing
 1. Open `http://localhost:8384` (Mac Syncthing UI)
 2. Add the NAS as a remote device — get its Device ID from `http://NAS_IP:8384`
 3. Share two folders:
-   - **audrey-vault:** Mac `~/Documents/audrey-vault` ↔ NAS `/volume1/obsidian/audrey-vault`
-   - **taylor-vault:** Mac `~/Documents/taylor-vault` ↔ NAS `/volume1/obsidian/taylor-vault`
+   - **audrey-vault:** Mac `~/Vaults/audrey-vault` ↔ NAS `/var/syncthing/obsidian/audrey-vault`
+   - **taylor-vault:** Mac `~/Vaults/taylor-vault` ↔ NAS `/var/syncthing/obsidian/taylor-vault`
 4. Set both folders to **Send & Receive** on both sides
 
-## 3. Cloudflare Tunnel Setup
+> **Important:** Syncthing must point at `~/Vaults`, **not** `~/Documents`. The vault bridge handles the `~/Vaults` ↔ `~/Documents` sync.
+
+## 3. Vault Bridge Setup (Mac Side)
+
+The vault bridge uses `fswatch` (macOS FSEvents) to detect file changes and `rsync` to sync between `~/Vaults` and `~/Documents`. This runs as a launchd user agent.
+
+```bash
+# From the project directory
+cd mac-bridge
+./setup.sh
+```
+
+The setup script will:
+- Install `fswatch` via Homebrew (if missing)
+- Create `~/Vaults/` and move existing vaults from `~/Documents/` (if present)
+- Install the bridge script to `/usr/local/bin/`
+- Load the launchd agent (starts automatically at login)
+
+### Verify the bridge
+
+```bash
+# Check the agent is running
+launchctl list | grep vaultbridge
+
+# Watch the sync log
+tail -f ~/Library/Logs/vault-bridge.log
+
+# Check for errors
+cat /tmp/vault-bridge-stderr.log
+```
+
+### Manage the bridge
+
+```bash
+# Stop
+launchctl unload ~/Library/LaunchAgents/com.vaultbridge.sync.plist
+
+# Start
+launchctl load ~/Library/LaunchAgents/com.vaultbridge.sync.plist
+```
+
+## 4. Cloudflare Tunnel Setup
 
 ### Create the Tunnel
 
@@ -92,23 +156,34 @@ For extra security, add Access policies under **Access → Applications**:
 
 > **Note:** Cloudflare Access may add an interstitial page that interferes with the MCP handshake. Test before relying on it. The tunnel URL alone is unguessable and not indexed.
 
-## 4. Deploy
+## 5. Deploy
 
 ```bash
 # Clone to your NAS
 cd /volume1/docker
-git clone <repo-url> obsidian-vault-manager
-cd obsidian-vault-manager
+git clone https://github.com/sudojsonbourne/Projects.git
+cd Projects/obsidian-vault-manager
 
 # Configure
 cp .env.example .env
 # Edit .env — paste your CLOUDFLARE_TUNNEL_TOKEN
 
-# Build and start
-docker-compose up -d --build
+# Ensure NAS directories exist with correct ownership (see Step 1)
+# If you haven't already:
+sudo mkdir -p /volume1/obsidian/{audrey-vault,taylor-vault,.syncthing-config}
+sudo chown -R 1026:100 /volume1/obsidian
 
-# Verify
-docker-compose logs -f cloudflared
+# Build and start
+sudo docker compose up -d --build
+
+# Verify all containers are healthy
+sudo docker ps
+
+# Check Syncthing logs (should show no ERR lines)
+sudo docker logs obsidian-syncthing --tail 10
+
+# Check Cloudflare tunnel connection
+sudo docker logs obsidian-cloudflared --tail 10
 # Look for: "INF Connection established"
 
 # Test health endpoints
@@ -116,7 +191,7 @@ curl http://localhost:3001/health
 curl http://localhost:3002/health
 ```
 
-## 5. Register Connectors in Claude
+## 6. Register Connectors in Claude
 
 ### Audrey's Connector
 
@@ -132,7 +207,7 @@ Repeat with URL: `https://taylor-vault.yourdomain.com/mcp`
 
 > Each person should add **only their own** connector in their own claude.ai account.
 
-## 6. iPhone Access
+## 7. iPhone Access
 
 Connectors configured on claude.ai sync automatically to the Claude iOS app. No additional setup needed.
 
