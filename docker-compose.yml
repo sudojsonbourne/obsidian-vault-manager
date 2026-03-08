@@ -7,17 +7,17 @@ services:
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     environment:
-      - OBSIDIAN_EMAIL=${OBSIDIAN_EMAIL_AUDREY}
-      - OBSIDIAN_PASSWORD=${OBSIDIAN_PASSWORD_AUDREY}
+      - OBSIDIAN_EMAIL=${OBSIDIAN_EMAIL}
+      - OBSIDIAN_PASSWORD=${OBSIDIAN_PASSWORD}
       - VAULT_NAME=${AUDREY_VAULT_NAME}
       - VAULT_PATH=/vault
-      - ENCRYPTION_PASSWORD=${AUDREY_ENCRYPTION_PASSWORD}
+      - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD}
     healthcheck:
       test: ["CMD", "pgrep", "-f", "ob sync"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s
 
   obsidian-sync-taylor:
     build:
@@ -27,23 +27,24 @@ services:
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     environment:
-      - OBSIDIAN_EMAIL=${OBSIDIAN_EMAIL_TAYLOR}
-      - OBSIDIAN_PASSWORD=${OBSIDIAN_PASSWORD_TAYLOR}
+      - OBSIDIAN_EMAIL=${OBSIDIAN_EMAIL}
+      - OBSIDIAN_PASSWORD=${OBSIDIAN_PASSWORD}
       - VAULT_NAME=${TAYLOR_VAULT_NAME}
       - VAULT_PATH=/vault
-      - ENCRYPTION_PASSWORD=${TAYLOR_ENCRYPTION_PASSWORD}
+      - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD}
     healthcheck:
       test: ["CMD", "pgrep", "-f", "ob sync"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s
 
   mcp-audrey:
     build:
       context: ./mcp-server
     container_name: obsidian-mcp-audrey
     restart: unless-stopped
+    user: "1026:100"
     volumes:
       - /volume1/obsidian:/vaults
     ports:
@@ -65,6 +66,7 @@ services:
       context: ./mcp-server
     container_name: obsidian-mcp-taylor
     restart: unless-stopped
+    user: "1026:100"
     volumes:
       - /volume1/obsidian:/vaults
     ports:
@@ -94,7 +96,7 @@ services:
       mcp-taylor:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "cloudflared", "tunnel", "info"]
+      test: ["CMD", "cloudflared", "version"]
       interval: 30s
       timeout: 10s
       retries: 3

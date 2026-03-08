@@ -47,28 +47,41 @@ Claude iOS / claude.ai  (your Max Plan)
 - A domain managed by Cloudflare DNS (free tier works)
 - A Cloudflare account (free)
 - Claude Pro or Max subscription
-- Obsidian Sync subscription (one per account — Audrey and Taylor each need one)
+- Obsidian Sync Plus subscription (single account, supports up to 10 vaults)
 
 ## 1. NAS Folder Setup
 
 ```bash
 # SSH into your NAS
-mkdir -p /volume1/obsidian/audrey-vault
-mkdir -p /volume1/obsidian/taylor-vault
+sudo mkdir -p /volume1/obsidian/{audrey-vault,taylor-vault}
+
+# Set ownership to your NAS user (typically UID 1026, GID 100 on Synology)
+sudo chown -R 1026:100 /volume1/obsidian
+
+# Set permissions — 775 on the parent, 770 on vault directories
+sudo chmod 775 /volume1/obsidian
+sudo chmod 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
 ```
 
-## 2. Configure Environment
+> **Why this matters:** The MCP containers run as `user: "1026:100"` (matching your Synology NAS user) and mount `/volume1/obsidian` as `/vaults`. Both the parent directory and vault subdirectories must be readable and traversable by UID 1026 — otherwise MCP tool calls will fail with `EACCES: permission denied`. See [Troubleshooting → Permission denied](#permission-denied-eacces-from-mcp-tools) for details.
+
+## 2. Obsidian Sync Setup
+
+A single [Obsidian Sync Plus](https://obsidian.md/sync) subscription covers both vaults (up to 10). The vaults must already exist in Obsidian Sync — create them from the Obsidian desktop or mobile app first, then the headless containers will pull them down to the NAS automatically.
+
+No additional configuration is needed beyond the `.env` file. The containers handle login, vault setup, and continuous sync on startup.
 
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` and fill in:
-- `CLOUDFLARE_TUNNEL_TOKEN` — from Cloudflare Zero Trust dashboard
-- `OBSIDIAN_EMAIL_AUDREY` / `OBSIDIAN_PASSWORD_AUDREY` — Audrey's Obsidian account
-- `OBSIDIAN_EMAIL_TAYLOR` / `OBSIDIAN_PASSWORD_TAYLOR` — Taylor's Obsidian account
-- `AUDREY_VAULT_NAME` / `TAYLOR_VAULT_NAME` — vault names as they appear in Obsidian Sync
-- `*_ENCRYPTION_PASSWORD` — only if E2EE is enabled on the vault (optional)
+- `CLOUDFLARE_TUNNEL_TOKEN` — from Cloudflare Zero Trust dashboard (see Step 3)
+- `OBSIDIAN_EMAIL` / `OBSIDIAN_PASSWORD` — your Obsidian account credentials
+- `AUDREY_VAULT_NAME` / `TAYLOR_VAULT_NAME` — vault names exactly as they appear in Obsidian Sync (case-sensitive)
+- `ENCRYPTION_PASSWORD` — only if E2EE is enabled on the vaults (optional)
+
+> **That's it.** The `entrypoint.sh` in each sync container runs `ob login`, `ob sync-setup`, and `ob sync --continuous` automatically using these credentials. No manual CLI steps or token extraction required.
 
 ## 3. Cloudflare Tunnel Setup
 
@@ -89,7 +102,23 @@ In the tunnel config on the dashboard, add two public hostnames:
 | `audrey-vault.yourdomain.com` | `http://mcp-audrey:3001` |
 | `taylor-vault.yourdomain.com` | `http://mcp-taylor:3002` |
 
-Cloudflare creates DNS records automatically.
+Cloudflare creates DNS CNAME records automatically, each pointing to `<tunnel-id>.cfargotunnel.com`.
+
+### Rebuilding or Replacing a Tunnel
+
+If you ever delete a tunnel and create a new one (e.g., to rotate the token), the new tunnel gets a **new UUID** — but the existing DNS CNAME records still point to the old tunnel ID. This causes **Cloudflare Error 1033** ("Argo Tunnel error") because the CNAME routes traffic to a tunnel that no longer exists.
+
+**To fix after a tunnel rebuild:**
+
+1. Go to **Cloudflare dashboard → DNS → Records** for your domain
+2. Find the CNAME records for your MCP hostnames (e.g., `audrey-vault`, `taylor-vault`)
+3. Each will point to something like `old-tunnel-id.cfargotunnel.com`
+4. Update both records to point to `new-tunnel-id.cfargotunnel.com`
+5. The new tunnel ID is visible in **Zero Trust → Networks → Tunnels** — click the tunnel name to see its ID
+
+Alternatively, delete the old CNAME records and re-add the public hostnames in the new tunnel's configuration — Cloudflare will create fresh CNAME records automatically.
+
+> **Tip:** If you only need to rotate the token (not rebuild the tunnel), use the **Regenerate token** button in the tunnel settings. This keeps the same tunnel ID and DNS records — just update `CLOUDFLARE_TUNNEL_TOKEN` in `.env` and restart cloudflared.
 
 ### Optional: Cloudflare Access
 
@@ -105,11 +134,18 @@ For extra security, add Access policies under **Access → Applications**:
 ```bash
 # Clone to your NAS
 cd /volume1/docker
-git clone https://github.com/sudojsonbourne/Projects.git
-cd Projects/obsidian-vault-manager
+git clone https://github.com/sudojsonbourne/obsidian-vault-manager.git
+cd obsidian-vault-manager
 
-# Ensure NAS directories exist (see Step 1)
+# Create vault directories with correct ownership and permissions
 sudo mkdir -p /volume1/obsidian/{audrey-vault,taylor-vault}
+sudo chown -R 1026:100 /volume1/obsidian
+sudo chmod 775 /volume1/obsidian
+sudo chmod 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
+
+# Copy and fill in environment variables (see Step 2)
+cp .env.example .env
+# Edit .env with your credentials
 
 # Build and start
 sudo docker compose up -d --build
@@ -129,6 +165,11 @@ sudo docker logs obsidian-cloudflared --tail 10
 curl http://localhost:3001/health
 curl http://localhost:3002/health
 ```
+
+> **Private repo?** If the GitHub repo is private, use a [personal access token](https://github.com/settings/tokens) in the clone URL:
+> ```bash
+> git clone https://<your-token>@github.com/sudojsonbourne/obsidian-vault-manager.git
+> ```
 
 ## 5. Register Connectors in Claude
 
@@ -189,18 +230,16 @@ npx @modelcontextprotocol/inspector
 | Variable | Description |
 |----------|-------------|
 | `CLOUDFLARE_TUNNEL_TOKEN` | Tunnel token from Cloudflare Zero Trust dashboard |
-| `OBSIDIAN_EMAIL_AUDREY` | Audrey's Obsidian account email |
-| `OBSIDIAN_PASSWORD_AUDREY` | Audrey's Obsidian account password |
+| `OBSIDIAN_EMAIL` | Obsidian account email |
+| `OBSIDIAN_PASSWORD` | Obsidian account password |
 | `AUDREY_VAULT_NAME` | Audrey's vault name in Obsidian Sync |
-| `AUDREY_ENCRYPTION_PASSWORD` | Audrey's vault E2EE password (optional) |
-| `OBSIDIAN_EMAIL_TAYLOR` | Taylor's Obsidian account email |
-| `OBSIDIAN_PASSWORD_TAYLOR` | Taylor's Obsidian account password |
 | `TAYLOR_VAULT_NAME` | Taylor's vault name in Obsidian Sync |
-| `TAYLOR_ENCRYPTION_PASSWORD` | Taylor's vault E2EE password (optional) |
+| `ENCRYPTION_PASSWORD` | Vault E2EE password (optional) |
 
 ## Troubleshooting
 
-**Sync container won't start / restart loop:**
+### Sync container won't start / restart loop
+
 ```bash
 sudo docker logs obsidian-sync-audrey --tail 30
 ```
@@ -208,34 +247,65 @@ sudo docker logs obsidian-sync-audrey --tail 30
 - Login failure → verify email/password, check if MFA is required on the account
 - Vault not found → run `ob sync-list-remote` locally to confirm the vault name
 
-**MCP servers won't start:**
-The MCP containers depend on sync containers being healthy. Check the sync logs first — MCP services wait until sync is running.
+### MCP servers won't start
 
-**Cloudflared stops after startup:**
+The MCP containers depend on sync containers being healthy (`depends_on: condition: service_healthy`). Check the sync logs first — MCP services wait until sync is running and healthy before starting.
+
+If a large vault takes longer than expected for the initial sync, the MCP container may time out waiting. The `start_period: 120s` in the sync container healthcheck should cover most vaults, but you can increase it in `docker-compose.yml` if needed.
+
+### Cloudflare Error 1033 (tunnel ID mismatch)
+
+If you see **Error 1033** ("Argo Tunnel error") when hitting your MCP URLs, the DNS CNAME records are pointing to an old tunnel ID. This happens when you delete and recreate a tunnel — the new tunnel gets a new UUID but the CNAME records still reference the old one.
+
+**Fix:**
+1. Go to **Cloudflare dashboard → DNS → Records** for your domain
+2. Find the CNAME records for your MCP hostnames (e.g., `audrey-vault`, `taylor-vault`)
+3. Update each CNAME target from `old-tunnel-id.cfargotunnel.com` to `new-tunnel-id.cfargotunnel.com`
+4. Find the new tunnel ID in **Zero Trust → Networks → Tunnels** — click the tunnel name
+
+See [Rebuilding or Replacing a Tunnel](#rebuilding-or-replacing-a-tunnel) for details.
+
+### Cloudflared stops after startup
+
 The `start_period: 30s` healthcheck gives it time to establish the tunnel. Check logs:
 ```bash
 sudo docker logs obsidian-cloudflared --tail 20
 ```
+Look for `INF Connection established` — this confirms the tunnel is connected. A `ERR` line with `failed to connect` usually means the token is wrong or expired.
 
-**Files not syncing:**
+### Permission denied (EACCES) from MCP tools
+
+If Claude discovers your vault tools but tool execution fails with `EACCES: permission denied, scandir '/vaults/audrey-vault'`, the MCP container can't read the vault files on disk.
+
+The MCP containers run as `user: "1026:100"` (set in `docker-compose.yml`) to match the default Synology NAS user. They mount the host path `/volume1/obsidian` as `/vaults` inside the container. Two things must be true for this to work:
+
+1. **The parent directory `/volume1/obsidian` must be traversable** — the container process needs read+execute on the parent to reach the vault subdirectories. Without this, `scandir` fails even if the subdirectories have correct permissions.
+
+2. **The vault directories must be owned by 1026:100** — the sync containers write files as root, but the MCP containers read them as UID 1026.
+
+**Fix:**
+```bash
+sudo chown -R 1026:100 /volume1/obsidian
+sudo chmod 775 /volume1/obsidian
+sudo chmod -R 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
+sudo docker compose restart mcp-audrey mcp-taylor
+```
+
+**Verify from inside the container:**
+```bash
+# Confirm the process runs as 1026
+sudo docker exec obsidian-mcp-audrey id
+# Expected: uid=1026 gid=100(users)
+
+# Confirm the vault is readable
+sudo docker exec obsidian-mcp-audrey ls -la /vaults/
+sudo docker exec obsidian-mcp-audrey ls -la /vaults/audrey-vault/
+```
+
+> **Synology ACL note:** Synology DSM uses POSIX ACLs that can override standard Unix permissions. If `chown`/`chmod` alone doesn't fix it, the ACLs may be blocking access. Running `chmod` on Synology typically resets the ACLs to match, but if issues persist, check ACLs via DSM → Control Panel → Shared Folder → Permissions.
+
+### Files not syncing
+
 - Verify Obsidian Sync is enabled and working on your Mac/iPhone first
 - Check sync container logs for errors
-- Ensure the vault name in `.env` matches the vault name in Obsidian exactly
-
-## Mac Cleanup (if migrating from Syncthing)
-
-If you previously used the Syncthing + vault-bridge setup, remove the old components:
-
-```bash
-# Stop and remove the vault bridge
-launchctl unload ~/Library/LaunchAgents/com.vaultbridge.sync.plist
-rm ~/Library/LaunchAgents/com.vaultbridge.sync.plist
-sudo rm /usr/local/bin/vault-bridge.sh
-
-# Uninstall Syncthing
-brew services stop syncthing
-brew uninstall syncthing
-
-# Remove the staging directory (no longer needed)
-rm -rf ~/Vaults
-```
+- Ensure the vault name in `.env` matches the vault name in Obsidian exactly (case-sensitive)
