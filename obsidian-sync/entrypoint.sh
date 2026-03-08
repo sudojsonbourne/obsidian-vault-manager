@@ -2,7 +2,7 @@
 set -e
 
 MAX_RETRIES=5
-RETRY_DELAY=10
+RETRY_DELAY=30
 
 echo "[obsidian-sync] Starting obsidian-headless sync"
 echo "[obsidian-sync] Vault: ${VAULT_NAME}"
