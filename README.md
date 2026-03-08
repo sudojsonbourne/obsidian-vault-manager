@@ -50,7 +50,10 @@ The vault data is protected by several layers:
 - **Vault isolation** — each MCP container mounts only its own vault directory. Even if the path validation in `server.js` had a bug, one vault's MCP server cannot access the other vault's files.
 - **Path traversal protection** — all file paths are resolved and validated against the vault root before any filesystem operation. Requests that attempt to escape the vault directory are rejected.
 - **Non-root containers** — all containers (sync and MCP) run as `user: 1026:100`, matching the Synology NAS user. No container runs as root.
-- **Resource limits** — each container has memory and CPU limits to prevent a runaway process from starving other NAS services.
+- **Resource limits** — each container has memory limits to prevent a runaway process from starving other NAS services.
+- **Hardened MCP containers** — MCP containers run with a read-only filesystem (`read_only: true`), all Linux capabilities dropped (`cap_drop: ALL`), and privilege escalation blocked (`no-new-privileges`). Only the vault mount is writable.
+- **Ephemeral credentials** — sync containers use a `tmpfs` mount for the Obsidian config directory. Login state exists only in RAM and vanishes on restart.
+- **File size guard** — `read_file` rejects files over 5MB to prevent memory exhaustion in the 256MB MCP containers.
 - **Optional: Cloudflare Access** — for additional authentication, you can add Cloudflare Access policies that require email verification before allowing traffic through the tunnel (see [Cloudflare Access](#optional-cloudflare-access)).
 
 **Known limitations:**
@@ -172,7 +175,7 @@ sudo docker logs obsidian-sync-taylor --tail 20
 
 # Check Cloudflare tunnel connection
 sudo docker logs obsidian-cloudflared --tail 10
-# Look for: "INF Connection established"
+# Look for: "INF Registered tunnel connection"
 
 # Test health endpoints (localhost only)
 curl http://localhost:3001/health
@@ -299,9 +302,15 @@ sudo docker logs obsidian-sync-audrey --tail 30
 
 ### MCP servers won't start
 
-The MCP containers depend on sync containers being healthy (`depends_on: condition: service_healthy`). Check the sync logs first — MCP services wait until sync is running and healthy before starting.
+The MCP containers depend on sync containers being started (`depends_on: condition: service_started`) — they don't wait for sync to be fully healthy, just for the container to launch. If the MCP server itself fails to start, check its logs:
 
-If a large vault takes longer than expected for the initial sync, the MCP container may time out waiting. The `start_period: 120s` in the sync container healthcheck should cover most vaults, but you can increase it in `docker-compose.yml` if needed.
+```bash
+sudo docker logs obsidian-mcp-audrey --tail 20
+```
+
+Common causes:
+- `VAULT_PATH environment variable is required` → check `docker-compose.yml` has the `VAULT_PATH` env var set
+- Permission errors → see [Permission denied](#permission-denied-eacces-from-mcp-tools) below
 
 ### Cloudflare Error 1033 (tunnel ID mismatch)
 
@@ -317,11 +326,18 @@ See [Rebuilding or Replacing a Tunnel](#rebuilding-or-replacing-a-tunnel) for de
 
 ### Cloudflared stops after startup
 
-The `start_period: 30s` healthcheck gives it time to establish the tunnel. Check logs:
+The healthcheck uses cloudflared's built-in metrics server (`--metrics localhost:2000`) and hits the `/ready` endpoint to verify the tunnel is actually connected — not just that the binary is running. The `start_period: 30s` gives it time to establish the tunnel before healthchecks begin.
+
+Check logs:
 ```bash
 sudo docker logs obsidian-cloudflared --tail 20
 ```
-Look for `INF Connection established` — this confirms the tunnel is connected. A `ERR` line with `failed to connect` usually means the token is wrong or expired.
+Look for `INF Registered tunnel connection` — this confirms the tunnel is connected. A `ERR` line with `failed to connect` usually means the token is wrong or expired.
+
+You can also check the readiness probe manually:
+```bash
+sudo docker exec obsidian-cloudflared wget -q -O- http://localhost:2000/ready
+```
 
 ### Permission denied (EACCES) from MCP tools
 

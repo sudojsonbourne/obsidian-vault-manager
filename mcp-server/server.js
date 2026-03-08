@@ -85,6 +85,10 @@ mcpServer.tool(
   async ({ path: filePath }) => {
     try {
       const resolved = resolveAndValidate(filePath);
+      const stat = await fs.stat(resolved);
+      if (stat.size > 5 * 1024 * 1024) {
+        return { content: [{ type: "text", text: `Error: File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Maximum is 5MB.` }], isError: true };
+      }
       const content = await fs.readFile(resolved, "utf-8");
       return { content: [{ type: "text", text: content }] };
     } catch (err) {
