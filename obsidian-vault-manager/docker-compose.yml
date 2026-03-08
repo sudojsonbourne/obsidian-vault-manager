@@ -59,7 +59,7 @@ services:
       - PORT=3001
     depends_on:
       obsidian-sync-audrey:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
       interval: 30s
@@ -82,7 +82,7 @@ services:
       - PORT=3002
     depends_on:
       obsidian-sync-taylor:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
       interval: 30s
@@ -97,11 +97,6 @@ services:
     command: tunnel --metrics localhost:2000 run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      mcp-audrey:
-        condition: service_healthy
-      mcp-taylor:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:2000/ready || exit 1"]
       interval: 30s
