@@ -2,8 +2,8 @@ FROM node:20-alpine3.21
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+COPY package.json .
+RUN npm install --omit=dev
 
 COPY server.js .
 
