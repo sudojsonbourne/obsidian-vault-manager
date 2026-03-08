@@ -6,7 +6,6 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 512m
-    cpus: 0.5
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     environment:
@@ -29,7 +28,6 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 512m
-    cpus: 0.5
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     environment:
@@ -52,7 +50,6 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 256m
-    cpus: 0.25
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     ports:
@@ -76,7 +73,6 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 256m
-    cpus: 0.25
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     ports:
@@ -98,7 +94,6 @@ services:
     container_name: obsidian-cloudflared
     restart: unless-stopped
     mem_limit: 128m
-    cpus: 0.25
     command: tunnel --metrics localhost:2000 run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
