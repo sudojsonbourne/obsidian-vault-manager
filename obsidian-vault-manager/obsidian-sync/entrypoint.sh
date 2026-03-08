@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+MAX_RETRIES=5
+RETRY_DELAY=10
+
 echo "[obsidian-sync] Starting obsidian-headless sync"
 echo "[obsidian-sync] Vault: ${VAULT_NAME}"
 echo "[obsidian-sync] Path: ${VAULT_PATH:-/vault}"
@@ -23,10 +26,23 @@ fi
 
 VAULT_DIR="${VAULT_PATH:-/vault}"
 
-# --- Authenticate ---
-echo "[obsidian-sync] Logging in as ${OBSIDIAN_EMAIL}..."
-ob login --email "$OBSIDIAN_EMAIL" --password "$OBSIDIAN_PASSWORD"
-echo "[obsidian-sync] Login successful"
+# --- Authenticate with backoff ---
+attempt=1
+while [ "$attempt" -le "$MAX_RETRIES" ]; do
+  echo "[obsidian-sync] Login attempt ${attempt}/${MAX_RETRIES}..."
+  if ob login --email "$OBSIDIAN_EMAIL" --password "$OBSIDIAN_PASSWORD"; then
+    echo "[obsidian-sync] Login successful"
+    break
+  fi
+  if [ "$attempt" -eq "$MAX_RETRIES" ]; then
+    echo "[obsidian-sync] ERROR: Login failed after ${MAX_RETRIES} attempts"
+    exit 1
+  fi
+  echo "[obsidian-sync] Login failed, retrying in ${RETRY_DELAY}s..."
+  sleep "$RETRY_DELAY"
+  RETRY_DELAY=$((RETRY_DELAY * 2))
+  attempt=$((attempt + 1))
+done
 
 # --- Setup vault sync ---
 echo "[obsidian-sync] Configuring vault sync..."

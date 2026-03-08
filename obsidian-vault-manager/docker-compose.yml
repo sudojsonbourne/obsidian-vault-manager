@@ -4,6 +4,9 @@ services:
       context: ./obsidian-sync
     container_name: obsidian-sync-audrey
     restart: unless-stopped
+    user: "1026:100"
+    mem_limit: 512m
+    cpus: 0.5
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     environment:
@@ -24,6 +27,9 @@ services:
       context: ./obsidian-sync
     container_name: obsidian-sync-taylor
     restart: unless-stopped
+    user: "1026:100"
+    mem_limit: 512m
+    cpus: 0.5
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     environment:
@@ -45,12 +51,14 @@ services:
     container_name: obsidian-mcp-audrey
     restart: unless-stopped
     user: "1026:100"
+    mem_limit: 256m
+    cpus: 0.25
     volumes:
-      - /volume1/obsidian:/vaults
+      - /volume1/obsidian/audrey-vault:/vault
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
-      - VAULT_PATH=/vaults/audrey-vault
+      - VAULT_PATH=/vault
       - PORT=3001
     depends_on:
       obsidian-sync-audrey:
@@ -67,12 +75,14 @@ services:
     container_name: obsidian-mcp-taylor
     restart: unless-stopped
     user: "1026:100"
+    mem_limit: 256m
+    cpus: 0.25
     volumes:
-      - /volume1/obsidian:/vaults
+      - /volume1/obsidian/taylor-vault:/vault
     ports:
-      - "3002:3002"
+      - "127.0.0.1:3002:3002"
     environment:
-      - VAULT_PATH=/vaults/taylor-vault
+      - VAULT_PATH=/vault
       - PORT=3002
     depends_on:
       obsidian-sync-taylor:
@@ -84,10 +94,12 @@ services:
       retries: 3
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2025.2.1
     container_name: obsidian-cloudflared
     restart: unless-stopped
-    command: tunnel run
+    mem_limit: 128m
+    cpus: 0.25
+    command: tunnel --metrics localhost:2000 run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
@@ -96,7 +108,7 @@ services:
       mcp-taylor:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "cloudflared", "version"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:2000/ready || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
