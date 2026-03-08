@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 512m
+    tmpfs:
+      - /home/obsidian
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     environment:
@@ -28,6 +30,8 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 512m
+    tmpfs:
+      - /home/obsidian
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     environment:
@@ -50,6 +54,13 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     ports:
@@ -73,6 +84,13 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     ports:
