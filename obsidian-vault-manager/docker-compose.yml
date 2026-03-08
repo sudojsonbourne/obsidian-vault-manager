@@ -1,23 +1,43 @@
 services:
-  syncthing:
-    image: syncthing/syncthing:latest
-    container_name: obsidian-syncthing
+  obsidian-sync-audrey:
+    build:
+      context: ./obsidian-sync
+    container_name: obsidian-sync-audrey
     restart: unless-stopped
-    user: "1026:100"
     volumes:
-      - /volume1/obsidian/audrey-vault:/var/syncthing/obsidian/audrey-vault
-      - /volume1/obsidian/taylor-vault:/var/syncthing/obsidian/taylor-vault
-      - /volume1/obsidian/.syncthing-config:/var/syncthing/config
-    ports:
-      - "8384:8384"   # Web UI
-      - "22000:22000/tcp" # Sync protocol
-      - "22000:22000/udp"
-      - "21027:21027/udp" # Discovery
+      - /volume1/obsidian/audrey-vault:/vault
+    environment:
+      - OBSIDIAN_EMAIL=${OBSIDIAN_EMAIL_AUDREY}
+      - OBSIDIAN_PASSWORD=${OBSIDIAN_PASSWORD_AUDREY}
+      - VAULT_NAME=${AUDREY_VAULT_NAME}
+      - VAULT_PATH=/vault
+      - ENCRYPTION_PASSWORD=${AUDREY_ENCRYPTION_PASSWORD}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8384/rest/noauth/health"]
+      test: ["CMD", "pgrep", "-f", "ob sync"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
+
+  obsidian-sync-taylor:
+    build:
+      context: ./obsidian-sync
+    container_name: obsidian-sync-taylor
+    restart: unless-stopped
+    volumes:
+      - /volume1/obsidian/taylor-vault:/vault
+    environment:
+      - OBSIDIAN_EMAIL=${OBSIDIAN_EMAIL_TAYLOR}
+      - OBSIDIAN_PASSWORD=${OBSIDIAN_PASSWORD_TAYLOR}
+      - VAULT_NAME=${TAYLOR_VAULT_NAME}
+      - VAULT_PATH=/vault
+      - ENCRYPTION_PASSWORD=${TAYLOR_ENCRYPTION_PASSWORD}
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "ob sync"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   mcp-audrey:
     build:
@@ -31,6 +51,9 @@ services:
     environment:
       - VAULT_PATH=/vaults/audrey-vault
       - PORT=3001
+    depends_on:
+      obsidian-sync-audrey:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
       interval: 30s
@@ -49,6 +72,9 @@ services:
     environment:
       - VAULT_PATH=/vaults/taylor-vault
       - PORT=3002
+    depends_on:
+      obsidian-sync-taylor:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
       interval: 30s
