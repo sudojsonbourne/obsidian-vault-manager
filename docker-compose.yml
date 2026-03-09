@@ -7,7 +7,7 @@ services:
     user: "1026:100"
     mem_limit: 512m
     tmpfs:
-      - /home/obsidian
+      - /home/obsidian:uid=1026,gid=100
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
     environment:
@@ -31,7 +31,7 @@ services:
     user: "1026:100"
     mem_limit: 512m
     tmpfs:
-      - /home/obsidian
+      - /home/obsidian:uid=1026,gid=100
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
     environment:
