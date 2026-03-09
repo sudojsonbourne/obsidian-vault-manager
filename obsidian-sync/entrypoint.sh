@@ -26,6 +26,24 @@ fi
 
 VAULT_DIR="${VAULT_PATH:-/vault}"
 
+# --- Clean up stale sync lock ---
+# obsidian-headless uses .obsidian/.sync.lock (a directory) to prevent
+# concurrent sync. If the container was hard-killed (OOM, SIGKILL), the
+# lock is not cleaned up and blocks future syncs with "Another sync
+# instance is already running". Safe to remove on startup since we know
+# no other sync process is running inside this container.
+LOCK_DIR="${VAULT_DIR}/.obsidian/.sync.lock"
+if [ -d "$LOCK_DIR" ]; then
+  echo "[obsidian-sync] Removing stale sync lock: ${LOCK_DIR}"
+  rm -rf "$LOCK_DIR"
+fi
+
+# --- Optional startup delay to stagger concurrent logins ---
+if [ -n "$STARTUP_DELAY" ]; then
+  echo "[obsidian-sync] Waiting ${STARTUP_DELAY}s before login..."
+  sleep "$STARTUP_DELAY"
+fi
+
 # --- Authenticate with backoff ---
 attempt=1
 while [ "$attempt" -le "$MAX_RETRIES" ]; do
