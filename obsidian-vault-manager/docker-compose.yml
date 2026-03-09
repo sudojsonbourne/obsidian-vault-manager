@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 512m
+    stop_grace_period: 30s
     tmpfs:
       - /home/obsidian:uid=1026,gid=100
     volumes:
@@ -30,6 +31,7 @@ services:
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 512m
+    stop_grace_period: 30s
     tmpfs:
       - /home/obsidian:uid=1026,gid=100
     volumes:
@@ -40,6 +42,7 @@ services:
       - VAULT_NAME=${TAYLOR_VAULT_NAME}
       - VAULT_PATH=/vault
       - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD}
+      - STARTUP_DELAY=15
     healthcheck:
       test: ["CMD", "pgrep", "-f", "ob sync"]
       interval: 30s
