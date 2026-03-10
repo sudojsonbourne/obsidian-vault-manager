@@ -218,8 +218,11 @@ Each vault server exposes these tools to Claude:
 | `list_directory` | List files and folders (relative path or root) |
 | `read_file` | Read a file's contents |
 | `write_file` | Create or overwrite a file |
+| `append_to_file` | Append content to an existing file (daily notes, logs) |
 | `delete_file` | Delete a file |
+| `move_file` | Move or rename a file or directory |
 | `search_files` | Search by filename (case-insensitive) |
+| `search_content` | Search for text inside vault files with snippets |
 | `create_directory` | Create a folder (with parents) |
 
 All paths are relative to the vault root. Path traversal is blocked.

@@ -27,6 +27,48 @@ function resolveAndValidate(filePath) {
   return full;
 }
 
+const TEXT_EXTENSIONS = new Set([
+  ".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".xml",
+  ".html", ".htm", ".css", ".js", ".ts", ".sh", ".py",
+  ".toml", ".ini", ".cfg", ".conf", ".log", ".tex", ".bib",
+]);
+
+async function walkContent(dir, query, results, limit = 50) {
+  if (results.length >= limit) return;
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (results.length >= limit) return;
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkContent(fullPath, query, results, limit);
+    } else {
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!TEXT_EXTENSIONS.has(ext)) continue;
+      try {
+        const stat = await fs.stat(fullPath);
+        if (stat.size > 1024 * 1024) continue; // skip files > 1MB
+        const content = await fs.readFile(fullPath, "utf-8");
+        const idx = content.toLowerCase().indexOf(query);
+        if (idx !== -1) {
+          const start = Math.max(0, idx - 40);
+          const end = Math.min(content.length, idx + query.length + 60);
+          const snippet = (start > 0 ? "…" : "") +
+            content.slice(start, end).replace(/\n/g, " ") +
+            (end < content.length ? "…" : "");
+          results.push({
+            name: entry.name,
+            path: path.relative(VAULT_ROOT, fullPath),
+            snippet,
+          });
+        }
+      } catch {
+        // skip unreadable files
+      }
+    }
+  }
+}
+
 async function walk(dir, query, results) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -118,6 +160,27 @@ mcpServer.tool(
   }
 );
 
+// Tool: append_to_file
+mcpServer.tool(
+  "append_to_file",
+  "Append content to the end of an existing file. Ideal for daily notes, logs, and running lists.",
+  {
+    path: z.string().describe("Relative file path within the vault"),
+    content: z.string().describe("Content to append to the end of the file"),
+  },
+  async ({ path: filePath, content }) => {
+    try {
+      const resolved = resolveAndValidate(filePath);
+      await fs.access(resolved);
+      await fs.appendFile(resolved, content, "utf-8");
+      const relPath = path.relative(VAULT_ROOT, resolved);
+      return { content: [{ type: "text", text: `Appended to: ${relPath}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 // Tool: delete_file
 mcpServer.tool(
   "delete_file",
@@ -134,6 +197,30 @@ mcpServer.tool(
   }
 );
 
+// Tool: move_file
+mcpServer.tool(
+  "move_file",
+  "Move or rename a file or directory in the vault.",
+  {
+    from: z.string().describe("Current relative path within the vault"),
+    to: z.string().describe("New relative path within the vault"),
+  },
+  async ({ from, to }) => {
+    try {
+      const resolvedFrom = resolveAndValidate(from);
+      const resolvedTo = resolveAndValidate(to);
+      await fs.access(resolvedFrom);
+      await fs.mkdir(path.dirname(resolvedTo), { recursive: true });
+      await fs.rename(resolvedFrom, resolvedTo);
+      const relFrom = path.relative(VAULT_ROOT, resolvedFrom);
+      const relTo = path.relative(VAULT_ROOT, resolvedTo);
+      return { content: [{ type: "text", text: `Moved: ${relFrom} → ${relTo}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 // Tool: search_files
 mcpServer.tool(
   "search_files",
@@ -143,6 +230,25 @@ mcpServer.tool(
     try {
       const results = [];
       await walk(VAULT_ROOT, query.toLowerCase(), results);
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool: search_content
+mcpServer.tool(
+  "search_content",
+  "Search for text inside vault files (case-insensitive). Returns matching files with a snippet showing where the match was found. Useful for finding notes by topic, tag, or wikilink.",
+  { query: z.string().describe("Text to search for inside file contents") },
+  async ({ query }) => {
+    try {
+      const results = [];
+      await walkContent(VAULT_ROOT, query.toLowerCase(), results);
+      if (results.length === 0) {
+        return { content: [{ type: "text", text: "No matches found." }] };
+      }
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
