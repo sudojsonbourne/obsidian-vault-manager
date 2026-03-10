@@ -69,6 +69,48 @@ async function walkContent(dir, query, results, limit = 50) {
   }
 }
 
+async function walkFiles(dir, results) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkFiles(fullPath, results);
+    } else {
+      results.push(fullPath);
+    }
+  }
+}
+
+function extractTags(content) {
+  const tags = new Set();
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (fmMatch) {
+    const fm = fmMatch[1];
+    const inlineArray = fm.match(/^tags:\s*\[([^\]]*)\]/m);
+    if (inlineArray) {
+      inlineArray[1].split(",").forEach((t) => {
+        const tag = t.trim().replace(/^['"]|['"]$/g, "");
+        if (tag) tags.add(tag.toLowerCase());
+      });
+    } else {
+      const blockList = fm.match(/^tags:\s*\n((?:[ \t]+-[^\n]*\n?)*)/m);
+      if (blockList) {
+        blockList[1].split("\n").forEach((line) => {
+          const tag = line.replace(/^\s*-\s*/, "").trim().replace(/^['"]|['"]$/g, "");
+          if (tag) tags.add(tag.toLowerCase());
+        });
+      }
+    }
+  }
+  // Inline #tags in body
+  const body = content.replace(/^---[\s\S]*?---\n?/, "");
+  (body.match(/#([a-zA-Z][a-zA-Z0-9_/-]*)/g) || []).forEach((t) =>
+    tags.add(t.slice(1).toLowerCase())
+  );
+  return tags;
+}
+
 async function walk(dir, query, results) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -99,19 +141,41 @@ const mcpServer = new McpServer({
 // Tool: list_directory
 mcpServer.tool(
   "list_directory",
-  "List files and directories in the vault. Provide a relative path or omit for the vault root.",
-  { path: z.string().optional().describe("Relative directory path within the vault (empty for root)") },
-  async ({ path: dirPath }) => {
+  "List files and directories in the vault. Provide a relative path or omit for the vault root. Set recursive=true to get the full tree in one call.",
+  {
+    path: z.string().optional().describe("Relative directory path within the vault (empty for root)"),
+    recursive: z.boolean().optional().describe("If true, recursively list all files and folders in the tree. Defaults to false."),
+  },
+  async ({ path: dirPath, recursive = false }) => {
     try {
       const resolved = resolveAndValidate(dirPath || "");
-      const entries = await fs.readdir(resolved, { withFileTypes: true });
-      const items = entries
-        .filter((e) => !e.name.startsWith("."))
-        .map((e) => ({
-          name: e.name,
-          type: e.isDirectory() ? "directory" : "file",
-          path: path.relative(VAULT_ROOT, path.join(resolved, e.name)),
-        }));
+      if (!recursive) {
+        const entries = await fs.readdir(resolved, { withFileTypes: true });
+        const items = entries
+          .filter((e) => !e.name.startsWith("."))
+          .map((e) => ({
+            name: e.name,
+            type: e.isDirectory() ? "directory" : "file",
+            path: path.relative(VAULT_ROOT, path.join(resolved, e.name)),
+          }));
+        return { content: [{ type: "text", text: JSON.stringify(items, null, 2) }] };
+      }
+      // Recursive walk
+      const items = [];
+      async function walkTree(dir) {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith(".")) continue;
+          const fullPath = path.join(dir, entry.name);
+          items.push({
+            name: entry.name,
+            type: entry.isDirectory() ? "directory" : "file",
+            path: path.relative(VAULT_ROOT, fullPath),
+          });
+          if (entry.isDirectory()) await walkTree(fullPath);
+        }
+      }
+      await walkTree(resolved);
       return { content: [{ type: "text", text: JSON.stringify(items, null, 2) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
@@ -250,6 +314,144 @@ mcpServer.tool(
         return { content: [{ type: "text", text: "No matches found." }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool: delete_directory
+mcpServer.tool(
+  "delete_directory",
+  "Delete a directory from the vault. By default only deletes empty directories. Set force=true to recursively delete a non-empty directory — this is irreversible.",
+  {
+    path: z.string().describe("Relative directory path to delete"),
+    force: z.boolean().optional().describe("Set to true to delete a non-empty directory and all its contents. Defaults to false (empty directories only)."),
+  },
+  async ({ path: dirPath, force = false }) => {
+    try {
+      const resolved = resolveAndValidate(dirPath);
+      if (resolved === VAULT_ROOT) {
+        return { content: [{ type: "text", text: "Error: Cannot delete the vault root." }], isError: true };
+      }
+      const entries = await fs.readdir(resolved);
+      if (entries.length > 0 && !force) {
+        return {
+          content: [{ type: "text", text: `Error: Directory is not empty (${entries.length} items). Set force=true to delete it and all its contents.` }],
+          isError: true,
+        };
+      }
+      await fs.rm(resolved, { recursive: true, force: false });
+      return { content: [{ type: "text", text: `Deleted directory: ${dirPath}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool: search_by_tag
+mcpServer.tool(
+  "search_by_tag",
+  "Find all notes in the vault that have a specific tag. Matches frontmatter tags (tags: [...] or block list) and inline #tags. Case-insensitive.",
+  { tag: z.string().describe("Tag to search for, with or without the leading #") },
+  async ({ tag }) => {
+    try {
+      const query = tag.replace(/^#/, "").toLowerCase();
+      const allFiles = [];
+      await walkFiles(VAULT_ROOT, allFiles);
+      const matches = [];
+      for (const fullPath of allFiles) {
+        if (path.extname(fullPath).toLowerCase() !== ".md") continue;
+        try {
+          const stat = await fs.stat(fullPath);
+          if (stat.size > 1024 * 1024) continue;
+          const content = await fs.readFile(fullPath, "utf-8");
+          const tags = extractTags(content);
+          if (tags.has(query)) {
+            matches.push({
+              name: path.basename(fullPath),
+              path: path.relative(VAULT_ROOT, fullPath),
+            });
+          }
+        } catch { /* skip unreadable */ }
+      }
+      if (matches.length === 0) {
+        return { content: [{ type: "text", text: `No notes found with tag: #${query}` }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(matches, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool: list_recent_files
+mcpServer.tool(
+  "list_recent_files",
+  "List the most recently modified files in the vault, sorted newest first.",
+  { limit: z.number().int().min(1).max(100).optional().describe("Number of files to return (default 10, max 100)") },
+  async ({ limit = 10 }) => {
+    try {
+      const allFiles = [];
+      await walkFiles(VAULT_ROOT, allFiles);
+      const withStats = await Promise.all(
+        allFiles.map(async (fullPath) => {
+          const stat = await fs.stat(fullPath);
+          return {
+            name: path.basename(fullPath),
+            path: path.relative(VAULT_ROOT, fullPath),
+            modified: stat.mtime.toISOString(),
+          };
+        })
+      );
+      withStats.sort((a, b) => b.modified.localeCompare(a.modified));
+      return { content: [{ type: "text", text: JSON.stringify(withStats.slice(0, limit), null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool: copy_file
+mcpServer.tool(
+  "copy_file",
+  "Copy a file to a new location within the vault. Destination parent directories are created automatically.",
+  {
+    from: z.string().describe("Relative path of the source file"),
+    to: z.string().describe("Relative path for the copy"),
+  },
+  async ({ from, to }) => {
+    try {
+      const resolvedFrom = resolveAndValidate(from);
+      const resolvedTo = resolveAndValidate(to);
+      await fs.access(resolvedFrom);
+      await fs.mkdir(path.dirname(resolvedTo), { recursive: true });
+      await fs.copyFile(resolvedFrom, resolvedTo);
+      return { content: [{ type: "text", text: `Copied: ${from} → ${to}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool: get_file_info
+mcpServer.tool(
+  "get_file_info",
+  "Get metadata for a file or directory (size, created, modified) without reading its contents.",
+  { path: z.string().describe("Relative path to a file or directory within the vault") },
+  async ({ path: filePath }) => {
+    try {
+      const resolved = resolveAndValidate(filePath);
+      const stat = await fs.stat(resolved);
+      const info = {
+        name: path.basename(resolved),
+        path: path.relative(VAULT_ROOT, resolved),
+        type: stat.isDirectory() ? "directory" : "file",
+        size: stat.size,
+        created: stat.birthtime.toISOString(),
+        modified: stat.mtime.toISOString(),
+      };
+      return { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }
