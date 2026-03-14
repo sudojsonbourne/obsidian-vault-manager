@@ -7,16 +7,18 @@ Manage Obsidian vaults on a Synology NAS directly from the Claude iOS app. Two M
 ```
 Claude iOS / claude.ai  (your Max Plan)
         │
-        │  HTTPS  (MCP Streamable HTTP)
+        │  HTTPS  (MCP Streamable HTTP + OAuth 2.1)
         ▼
-  Cloudflare Edge  (TLS, tunnel routing)
+  Cloudflare Edge  (TLS, tunnel routing, WAF)
         │
         │  Cloudflare Tunnel
         ▼
-┌──── cloudflared (Docker) ──────────────────────┐
-│  audrey-vault.yourdomain.com → mcp-audrey:3001 │
-│  taylor-vault.yourdomain.com → mcp-taylor:3002 │
-└────────────────────────────────────────────────┘
+┌──── cloudflared (Docker) ──────────────────────────────┐
+│  audrey-vault.yourdomain.com → auth-proxy:3000         │
+│  taylor-vault.yourdomain.com → auth-proxy:3000         │
+└────────────────────────────────────────────────────────┘
+        │
+   auth-proxy  (OAuth 2.1 + token validation)
         │                    │
    mcp-audrey            mcp-taylor
    /vault (audrey)       /vault (taylor)
@@ -37,7 +39,8 @@ Claude iOS / claude.ai  (your Max Plan)
 | `obsidian-sync-taylor` | Syncs Taylor's vault from Obsidian Cloud to NAS |
 | `mcp-audrey` | MCP server scoped to Audrey's vault |
 | `mcp-taylor` | MCP server scoped to Taylor's vault |
-| `cloudflared` | Cloudflare Tunnel — exposes both MCP servers over HTTPS |
+| `auth-proxy` | OAuth 2.1 authorization server + reverse proxy for MCP endpoints |
+| `cloudflared` | Cloudflare Tunnel — exposes auth-proxy over HTTPS |
 
 > **No Mac-side services needed.** Native Obsidian Sync handles Mac and iPhone devices automatically.
 
@@ -46,20 +49,21 @@ Claude iOS / claude.ai  (your Max Plan)
 The vault data is protected by several layers:
 
 - **Cloudflare Tunnel** — the MCP servers are not exposed to the public internet. Traffic routes through an encrypted Cloudflare Tunnel, which terminates TLS at the Cloudflare edge. No ports are opened on your router or firewall.
-- **Localhost-only ports** — MCP ports (3001, 3002) are bound to `127.0.0.1` on the NAS. They are not reachable from other devices on the LAN.
+- **Cloudflare WAF hardening** — WAF custom rules and rate limiting provide defense-in-depth at the Cloudflare edge, blocking malformed or excessive requests before they reach your NAS. See [Cloudflare Hardening](#cloudflare-hardening).
+- **OAuth 2.1 authentication** — the auth-proxy sidecar implements a full OAuth 2.1 authorization server with PKCE (S256). Claude.ai authenticates through a standard OAuth flow before accessing any MCP endpoint. Access tokens are vault-scoped — a token issued for one vault cannot access the other. Tokens expire after 1 hour, with 30-day rotating refresh tokens.
+- **Localhost-only ports** — MCP ports (3001, 3002) are internal to the Docker network. The auth-proxy port (3000) is bound to `127.0.0.1` on the NAS. They are not reachable from other devices on the LAN.
 - **Vault isolation** — each MCP container mounts only its own vault directory. Even if the path validation in `server.js` had a bug, one vault's MCP server cannot access the other vault's files.
 - **Path traversal protection** — all file paths are resolved and validated against the vault root before any filesystem operation. Requests that attempt to escape the vault directory are rejected.
 - **Non-root containers** — all containers (sync and MCP) run as `user: 1026:100`, matching the Synology NAS user. No container runs as root.
 - **Resource limits** — each container has memory limits to prevent a runaway process from starving other NAS services.
 - **Hardened MCP containers** — MCP containers run with a read-only filesystem (`read_only: true`), all Linux capabilities dropped (`cap_drop: ALL`), and privilege escalation blocked (`no-new-privileges`). Only the vault mount is writable.
 - **Ephemeral credentials** — sync containers use a `tmpfs` mount for the Obsidian config directory. Login state exists only in RAM and vanishes on restart.
+- **PID namespace isolation** — sync containers run with `pid: private`, isolating their `/proc` namespace. Processes on the NAS host cannot see command arguments inside the container via `ps aux`.
 - **File size guard** — `read_file` rejects files over 5MB to prevent memory exhaustion in the 256MB MCP containers.
-- **Optional: Cloudflare Access** — for additional authentication, you can add Cloudflare Access policies that require email verification before allowing traffic through the tunnel (see [Cloudflare Access](#optional-cloudflare-access)).
 
 **Known limitations:**
-- The MCP endpoints have no application-level authentication. Security relies on the Cloudflare Tunnel being the only ingress path. Enabling Cloudflare Access is strongly recommended for production use.
 - Both vaults share a single Obsidian account/password. If per-vault credentials are needed, update `.env` and `docker-compose.yml` to use separate variables.
-- Obsidian credentials are passed as CLI arguments to `ob login`, which makes them visible in process listings (`ps aux`) inside the container.
+- Obsidian credentials are passed as CLI arguments to `ob login`, which makes them briefly visible in process listings inside the container. This exposure is transient (only during the login call, not during the long-running `ob sync --continuous`) and mitigated by PID namespace isolation (`pid: private`) and ephemeral tmpfs credential storage.
 
 ## Prerequisites
 
@@ -81,6 +85,11 @@ sudo chown -R 1026:100 /volume1/obsidian
 # Set permissions — 775 on the parent, 770 on vault directories
 sudo chmod 775 /volume1/obsidian
 sudo chmod 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
+
+# Auth proxy data directory (SQLite database for OAuth tokens)
+sudo mkdir -p /volume1/obsidian/auth-data
+sudo chown 1026:100 /volume1/obsidian/auth-data
+sudo chmod 770 /volume1/obsidian/auth-data
 ```
 
 > **Why this matters:** All containers run as `user: "1026:100"` (matching your Synology NAS user). Both the parent directory and vault subdirectories must be owned and traversable by UID 1026 — otherwise MCP tool calls and sync writes will fail with `EACCES: permission denied`. See [Troubleshooting → Permission denied](#permission-denied-eacces-from-mcp-tools) for details.
@@ -100,6 +109,9 @@ Edit `.env` and fill in:
 - `OBSIDIAN_EMAIL` / `OBSIDIAN_PASSWORD` — your Obsidian account credentials
 - `AUDREY_VAULT_NAME` / `TAYLOR_VAULT_NAME` — vault names exactly as they appear in Obsidian Sync (case-sensitive)
 - `ENCRYPTION_PASSWORD` — only if E2EE is enabled on the vaults (optional)
+- `AUDREY_VAULT_PASSWORD` / `TAYLOR_VAULT_PASSWORD` — OAuth login passwords for each vault (one per user)
+- `AUTH_SECRET` — random 64-character hex string for internal integrity checks (generate with `openssl rand -hex 32`)
+- `AUDREY_PUBLIC_URL` / `TAYLOR_PUBLIC_URL` — public-facing base URLs matching your Cloudflare tunnel hostnames
 
 > **That's it.** The `entrypoint.sh` in each sync container runs `ob login`, `ob sync-setup`, and `ob sync --continuous` automatically using these credentials. Login failures are retried up to 5 times with exponential backoff to avoid account lockout.
 
@@ -119,8 +131,10 @@ In the tunnel config on the dashboard, add two public hostnames:
 
 | Public Hostname | Service |
 |-----------------|---------|
-| `audrey-vault.yourdomain.com` | `http://mcp-audrey:3001` |
-| `taylor-vault.yourdomain.com` | `http://mcp-taylor:3002` |
+| `audrey-vault.yourdomain.com` | `http://auth-proxy:3000` |
+| `taylor-vault.yourdomain.com` | `http://auth-proxy:3000` |
+
+> Both hostnames point to the same auth-proxy container. The proxy uses the `Host` header to route to the correct MCP backend and enforce vault-scoped authentication.
 
 Cloudflare creates DNS CNAME records automatically, each pointing to `<tunnel-id>.cfargotunnel.com`.
 
@@ -140,14 +154,57 @@ Alternatively, delete the old CNAME records and re-add the public hostnames in t
 
 > **Tip:** If you only need to rotate the token (not rebuild the tunnel), use the **Regenerate token** button in the tunnel settings. This keeps the same tunnel ID and DNS records — just update `CLOUDFLARE_TUNNEL_TOKEN` in `.env` and restart cloudflared.
 
-### Optional: Cloudflare Access
+### Cloudflare Hardening
 
-For extra security, add Access policies under **Access → Applications**:
-- Create a self-hosted app for each hostname
-- Add an Allow rule by email address
-- Users authenticate with a one-time email code
+The MCP endpoints are authenticated at the application level via OAuth 2.1 (see [Security Model](#security-model)). The following Cloudflare WAF rules provide defense-in-depth — blocking malformed or excessive requests at the edge before they reach your NAS.
 
-> **Note:** Cloudflare Access may add an interstitial page that interferes with the MCP handshake. Test before relying on it. Consider using [Service Auth tokens](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) as an alternative that works cleanly with programmatic clients.
+#### WAF Custom Rules (free tier — up to 5 rules)
+
+Go to **Cloudflare dashboard → Security → WAF → Custom rules** for your domain.
+
+**Rule 1: Block non-POST methods on MCP paths**
+
+The MCP endpoint only accepts POST requests. Block everything else at the edge rather than letting it through to Express.
+
+| Field | Value |
+|-------|-------|
+| Rule name | MCP POST only |
+| Expression | `(http.host in {"audrey-vault.yourdomain.com" "taylor-vault.yourdomain.com"} and http.request.uri.path eq "/mcp" and http.request.method ne "POST")` |
+| Action | Block |
+
+**Rule 2: Geo-restrict to expected regions (optional)**
+
+If you know Anthropic routes MCP traffic from the US, restrict to that region. Monitor Cloudflare analytics first to confirm — Anthropic may use global infrastructure.
+
+| Field | Value |
+|-------|-------|
+| Rule name | MCP geo-restrict |
+| Expression | `(http.host in {"audrey-vault.yourdomain.com" "taylor-vault.yourdomain.com"} and not ip.geoip.country in {"US"})` |
+| Action | Block |
+
+> **Tip:** Start with this rule in **Log** mode (action: Log) to observe traffic origins before switching to Block.
+
+#### WAF Rate Limiting (free tier — 1 rule)
+
+Go to **Cloudflare dashboard → Security → WAF → Rate limiting rules**.
+
+| Field | Value |
+|-------|-------|
+| Rule name | MCP rate limit |
+| Expression | `(http.host in {"audrey-vault.yourdomain.com" "taylor-vault.yourdomain.com"} and http.request.uri.path eq "/mcp")` |
+| Rate | 60 requests per minute |
+| Counting | Per IP (free tier) |
+| Mitigation | Block for 10 minutes |
+
+Normal Claude usage won't approach 60 requests per minute. This protects against brute-force attempts or abuse if someone discovers the endpoint.
+
+> **Note:** The OAuth endpoints (`/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`) are not covered by the MCP rate-limiting rule since they use different paths. The `/authorize` endpoint is protected against brute-force password guessing by the per-IP rate limit — each failed attempt still counts against the 60 req/min limit for the hostname.
+
+#### Monitoring
+
+- **Traffic analytics:** Cloudflare dashboard → Analytics & Logs → Traffic. Free tier includes per-hostname request analytics — monitor for unusual patterns on MCP hostnames.
+- **WAF events:** Security → Events shows blocked requests from your custom rules and rate limiting. Check periodically to verify rules are working and tune thresholds.
+- **Paid tiers (Pro+):** Add detailed request logs, alerting, and additional WAF rules.
 
 ## 4. Deploy
 
@@ -178,8 +235,9 @@ sudo docker logs obsidian-cloudflared --tail 10
 # Look for: "INF Registered tunnel connection"
 
 # Test health endpoints (localhost only)
-curl http://localhost:3001/health
-curl http://localhost:3002/health
+curl http://localhost:3000/health   # auth-proxy
+curl http://localhost:3001/health   # mcp-audrey (internal only — no longer exposed to host after auth-proxy)
+curl http://localhost:3002/health   # mcp-taylor (internal only)
 ```
 
 > **Private repo?** If the GitHub repo is private, use a [personal access token](https://github.com/settings/tokens) in the clone URL:
@@ -194,14 +252,15 @@ curl http://localhost:3002/health
 1. Go to [claude.ai](https://claude.ai) → profile icon → **Settings → Connectors**
 2. Click **Add custom connector**
 3. Enter URL: `https://audrey-vault.yourdomain.com/mcp`
-4. Leave authentication blank (authless — Cloudflare Tunnel handles security)
-5. Click **Add** — Claude discovers the vault tools automatically
+4. Click **Add** — Claude initiates the OAuth 2.1 flow
+5. A login page appears — enter the vault password (the `AUDREY_VAULT_PASSWORD` from `.env`)
+6. After authenticating, Claude discovers the vault tools automatically
 
 ### Taylor's Connector
 
-Repeat with URL: `https://taylor-vault.yourdomain.com/mcp`
+Repeat with URL: `https://taylor-vault.yourdomain.com/mcp` and Taylor's vault password.
 
-> Each person should add **only their own** connector in their own claude.ai account.
+> Each person should add **only their own** connector in their own claude.ai account. Tokens expire after 1 hour and are automatically refreshed — no manual re-authentication needed.
 
 ## 6. iPhone & Mac Access
 
@@ -236,8 +295,9 @@ All paths are relative to the vault root. Path traversal is blocked.
 
 | Port | Service | Purpose |
 |------|---------|---------|
-| 3001 | mcp-audrey | Audrey's MCP server (localhost only) |
-| 3002 | mcp-taylor | Taylor's MCP server (localhost only) |
+| 3000 | auth-proxy | OAuth 2.1 proxy (localhost only — sole entry point) |
+| 3001 | mcp-audrey | Audrey's MCP server (Docker-internal only) |
+| 3002 | mcp-taylor | Taylor's MCP server (Docker-internal only) |
 
 ## Testing Locally
 
@@ -249,6 +309,7 @@ npx @modelcontextprotocol/inspector
 # URL: http://localhost:3001/mcp
 ```
 
+
 ## Environment Variables
 
 | Variable | Description |
@@ -259,6 +320,11 @@ npx @modelcontextprotocol/inspector
 | `AUDREY_VAULT_NAME` | Audrey's vault name in Obsidian Sync |
 | `TAYLOR_VAULT_NAME` | Taylor's vault name in Obsidian Sync |
 | `ENCRYPTION_PASSWORD` | Vault E2EE password (optional) |
+| `AUDREY_VAULT_PASSWORD` | OAuth login password for Audrey's vault |
+| `TAYLOR_VAULT_PASSWORD` | OAuth login password for Taylor's vault |
+| `AUTH_SECRET` | Random 64-char hex string for auth integrity checks |
+| `AUDREY_PUBLIC_URL` | Public base URL for Audrey's vault (e.g., `https://audrey-vault.yourdomain.com`) |
+| `TAYLOR_PUBLIC_URL` | Public base URL for Taylor's vault (e.g., `https://taylor-vault.yourdomain.com`) |
 
 ## Updating
 
@@ -358,7 +424,7 @@ All containers run as `user: "1026:100"` (set in `docker-compose.yml`) to match 
 sudo chown -R 1026:100 /volume1/obsidian
 sudo chmod 775 /volume1/obsidian
 sudo chmod -R 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
-sudo docker compose restart mcp-audrey mcp-taylor
+sudo docker compose restart mcp-audrey mcp-taylor auth-proxy
 ```
 
 **Verify from inside the container:**

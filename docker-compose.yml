@@ -7,6 +7,7 @@ services:
     user: "1026:100"
     mem_limit: 512m
     stop_grace_period: 30s
+    pid: "private"
     tmpfs:
       - /home/obsidian:uid=1026,gid=100
     volumes:
@@ -32,6 +33,7 @@ services:
     user: "1026:100"
     mem_limit: 512m
     stop_grace_period: 30s
+    pid: "private"
     tmpfs:
       - /home/obsidian:uid=1026,gid=100
     volumes:
@@ -66,8 +68,6 @@ services:
       - ALL
     volumes:
       - /volume1/obsidian/audrey-vault:/vault
-    ports:
-      - "127.0.0.1:3001:3001"
     environment:
       - VAULT_PATH=/vault
       - PORT=3001
@@ -96,8 +96,6 @@ services:
       - ALL
     volumes:
       - /volume1/obsidian/taylor-vault:/vault
-    ports:
-      - "127.0.0.1:3002:3002"
     environment:
       - VAULT_PATH=/vault
       - PORT=3002
@@ -106,6 +104,44 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  auth-proxy:
+    build:
+      context: ./auth-proxy
+    container_name: obsidian-auth-proxy
+    restart: unless-stopped
+    user: "1026:100"
+    mem_limit: 128m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - /volume1/obsidian/auth-data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - PORT=3000
+      - AUDREY_VAULT_PASSWORD=${AUDREY_VAULT_PASSWORD}
+      - TAYLOR_VAULT_PASSWORD=${TAYLOR_VAULT_PASSWORD}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - AUDREY_PUBLIC_URL=${AUDREY_PUBLIC_URL}
+      - TAYLOR_PUBLIC_URL=${TAYLOR_PUBLIC_URL}
+      - AUDREY_BACKEND=http://mcp-audrey:3001
+      - TAYLOR_BACKEND=http://mcp-taylor:3002
+    depends_on:
+      mcp-audrey:
+        condition: service_healthy
+      mcp-taylor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
