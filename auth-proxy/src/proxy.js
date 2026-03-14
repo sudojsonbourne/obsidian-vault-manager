@@ -1,4 +1,4 @@
-import { createProxyMiddleware } from "http-proxy-middleware";
+import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import { resolveVault, config } from "./config.js";
 
 /**
@@ -7,6 +7,9 @@ import { resolveVault, config } from "./config.js";
  *
  * Mounted at /mcp in server.js, so Express strips the /mcp prefix.
  * pathRewrite adds it back so the backend receives /mcp.
+ *
+ * fixRequestBody re-serializes req.body after express.json() consumed
+ * the raw stream, so the proxy can forward the body to the backend.
  */
 export const mcpProxy = createProxyMiddleware({
   router: (req) => {
@@ -17,6 +20,7 @@ export const mcpProxy = createProxyMiddleware({
   changeOrigin: true,
   pathRewrite: { "^/": "/mcp" },
   on: {
+    proxyReq: fixRequestBody,
     error(err, req, res) {
       console.error(`Proxy error: ${err.message}`);
       if (!res.headersSent) {
