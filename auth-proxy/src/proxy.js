@@ -4,6 +4,9 @@ import { resolveVault, config } from "./config.js";
 /**
  * Proxy middleware that forwards authenticated /mcp requests to the
  * correct MCP backend based on the Host header.
+ *
+ * Mounted at /mcp in server.js, so Express strips the /mcp prefix.
+ * pathRewrite adds it back so the backend receives /mcp.
  */
 export const mcpProxy = createProxyMiddleware({
   router: (req) => {
@@ -12,8 +15,7 @@ export const mcpProxy = createProxyMiddleware({
     return config.vaults[vault].backend;
   },
   changeOrigin: true,
-  // Only proxy /mcp — the path stays the same
-  pathFilter: "/mcp",
+  pathRewrite: { "^/": "/mcp" },
   on: {
     error(err, req, res) {
       console.error(`Proxy error: ${err.message}`);
