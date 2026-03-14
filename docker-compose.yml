@@ -7,7 +7,6 @@ services:
     user: "1026:100"
     mem_limit: 512m
     stop_grace_period: 30s
-    pid: "private"
     tmpfs:
       - /home/obsidian:uid=1026,gid=100
     volumes:
@@ -33,7 +32,6 @@ services:
     user: "1026:100"
     mem_limit: 512m
     stop_grace_period: 30s
-    pid: "private"
     tmpfs:
       - /home/obsidian:uid=1026,gid=100
     volumes:
