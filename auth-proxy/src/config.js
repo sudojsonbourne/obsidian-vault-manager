@@ -35,7 +35,7 @@ export const config = {
 
   tokens: {
     accessTtlSeconds: 3600,        // 1 hour
-    refreshTtlSeconds: 2592000,    // 30 days
+    refreshTtlSeconds: 7776000,    // 90 days
     codeTtlSeconds: 600,           // 10 minutes
   },
 };
