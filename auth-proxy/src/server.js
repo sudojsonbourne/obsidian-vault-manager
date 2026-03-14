@@ -4,7 +4,6 @@ import { cleanup } from "./store/tokens.js";
 
 // OAuth routes
 import metadataRouter from "./oauth/metadata.js";
-import registerRouter from "./oauth/register.js";
 import authorizeRouter from "./oauth/authorize.js";
 import tokenRouter from "./oauth/token.js";
 
@@ -14,11 +13,8 @@ import { mcpProxy } from "./proxy.js";
 
 const app = express();
 
-// JSON body parsing for /register
+// JSON body parsing
 app.use(express.json());
-
-// URL-encoded body parsing for /authorize POST (login form submission)
-app.use(express.urlencoded({ extended: false }));
 
 // ── Health check ────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -27,8 +23,7 @@ app.get("/health", (_req, res) => {
 
 // ── OAuth 2.1 endpoints ────────────────────────────────────────────
 app.use(metadataRouter);     // GET /.well-known/oauth-authorization-server
-app.use(registerRouter);     // POST /register
-app.use(authorizeRouter);    // GET + POST /authorize
+app.use(authorizeRouter);    // GET /authorize (auto-approve)
 app.use(tokenRouter);        // POST /token
 
 // ── Authenticated MCP proxy ────────────────────────────────────────

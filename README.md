@@ -50,7 +50,7 @@ The vault data is protected by several layers:
 
 - **Cloudflare Tunnel** — the MCP servers are not exposed to the public internet. Traffic routes through an encrypted Cloudflare Tunnel, which terminates TLS at the Cloudflare edge. No ports are opened on your router or firewall.
 - **Cloudflare WAF hardening** — WAF custom rules and rate limiting provide defense-in-depth at the Cloudflare edge, blocking malformed or excessive requests before they reach your NAS. See [Cloudflare Hardening](#cloudflare-hardening).
-- **OAuth 2.1 authentication** — the auth-proxy sidecar implements a full OAuth 2.1 authorization server with PKCE (S256). Claude.ai authenticates through a standard OAuth flow before accessing any MCP endpoint. Access tokens are vault-scoped — a token issued for one vault cannot access the other. Tokens expire after 1 hour, with 30-day rotating refresh tokens.
+- **OAuth 2.1 authentication** — the auth-proxy sidecar implements an OAuth 2.1 authorization server with PKCE (S256) and pre-registered confidential clients. Each vault has its own `client_id` and `client_secret`, configured in the Claude.ai connector. The authorization flow is fully automatic (no interactive login page). Access tokens are vault-scoped — a token issued for one vault cannot access the other. Tokens expire after 1 hour, with 90-day rotating refresh tokens.
 - **Localhost-only ports** — MCP ports (3001, 3002) are internal to the Docker network. The auth-proxy port (3000) is bound to `127.0.0.1` on the NAS. They are not reachable from other devices on the LAN.
 - **Vault isolation** — each MCP container mounts only its own vault directory. Even if the path validation in `server.js` had a bug, one vault's MCP server cannot access the other vault's files.
 - **Path traversal protection** — all file paths are resolved and validated against the vault root before any filesystem operation. Requests that attempt to escape the vault directory are rejected.
@@ -109,7 +109,8 @@ Edit `.env` and fill in:
 - `OBSIDIAN_EMAIL` / `OBSIDIAN_PASSWORD` — your Obsidian account credentials
 - `AUDREY_VAULT_NAME` / `TAYLOR_VAULT_NAME` — vault names exactly as they appear in Obsidian Sync (case-sensitive)
 - `ENCRYPTION_PASSWORD` — only if E2EE is enabled on the vaults (optional)
-- `AUDREY_VAULT_PASSWORD` / `TAYLOR_VAULT_PASSWORD` — OAuth login passwords for each vault (one per user)
+- `AUDREY_CLIENT_ID` / `TAYLOR_CLIENT_ID` — OAuth client IDs (generate with `uuidgen`)
+- `AUDREY_CLIENT_SECRET` / `TAYLOR_CLIENT_SECRET` — OAuth client secrets (generate with `openssl rand -hex 32`)
 - `AUTH_SECRET` — random 64-character hex string for internal integrity checks (generate with `openssl rand -hex 32`)
 - `AUDREY_PUBLIC_URL` / `TAYLOR_PUBLIC_URL` — public-facing base URLs matching your Cloudflare tunnel hostnames
 
@@ -252,15 +253,14 @@ curl http://localhost:3002/health   # mcp-taylor (internal only)
 1. Go to [claude.ai](https://claude.ai) → profile icon → **Settings → Connectors**
 2. Click **Add custom connector**
 3. Enter URL: `https://audrey-vault.yourdomain.com/mcp`
-4. Click **Add** — Claude initiates the OAuth 2.1 flow
-5. A login page appears — enter the vault password (the `AUDREY_VAULT_PASSWORD` from `.env`)
-6. After authenticating, Claude discovers the vault tools automatically
+4. Enter the client ID (`AUDREY_CLIENT_ID` from `.env`) and client secret (`AUDREY_CLIENT_SECRET`)
+5. Click **Add** — Claude completes the OAuth 2.1 flow automatically and discovers the vault tools
 
 ### Taylor's Connector
 
-Repeat with URL: `https://taylor-vault.yourdomain.com/mcp` and Taylor's vault password.
+Repeat with URL: `https://taylor-vault.yourdomain.com/mcp` and Taylor's client ID/secret.
 
-> Each person should add **only their own** connector in their own claude.ai account. Tokens expire after 1 hour and are automatically refreshed — no manual re-authentication needed.
+> Each person should add **only their own** connector in their own claude.ai account. The OAuth flow is fully automatic — no interactive login page. Tokens expire after 1 hour and are automatically refreshed (refresh tokens last 90 days).
 
 ## 6. iPhone & Mac Access
 
@@ -320,8 +320,10 @@ npx @modelcontextprotocol/inspector
 | `AUDREY_VAULT_NAME` | Audrey's vault name in Obsidian Sync |
 | `TAYLOR_VAULT_NAME` | Taylor's vault name in Obsidian Sync |
 | `ENCRYPTION_PASSWORD` | Vault E2EE password (optional) |
-| `AUDREY_VAULT_PASSWORD` | OAuth login password for Audrey's vault |
-| `TAYLOR_VAULT_PASSWORD` | OAuth login password for Taylor's vault |
+| `AUDREY_CLIENT_ID` | OAuth client ID for Audrey's vault connector |
+| `AUDREY_CLIENT_SECRET` | OAuth client secret for Audrey's vault connector |
+| `TAYLOR_CLIENT_ID` | OAuth client ID for Taylor's vault connector |
+| `TAYLOR_CLIENT_SECRET` | OAuth client secret for Taylor's vault connector |
 | `AUTH_SECRET` | Random 64-char hex string for auth integrity checks |
 | `AUDREY_PUBLIC_URL` | Public base URL for Audrey's vault (e.g., `https://audrey-vault.yourdomain.com`) |
 | `TAYLOR_PUBLIC_URL` | Public base URL for Taylor's vault (e.g., `https://taylor-vault.yourdomain.com`) |

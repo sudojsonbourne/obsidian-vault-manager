@@ -1,6 +1,6 @@
 import { Router } from "express";
 import express from "express";
-import { getClient } from "../store/clients.js";
+import { getClient, verifyClientSecret } from "../store/clients.js";
 import { consumeCode } from "../store/codes.js";
 import { createTokenPair, consumeRefreshToken } from "../store/tokens.js";
 import { verifyPKCE } from "./pkce.js";
@@ -27,18 +27,18 @@ router.post("/token", (req, res) => {
 });
 
 function handleAuthorizationCode(req, res) {
-  const { code, client_id, redirect_uri, code_verifier } = req.body;
+  const { code, client_id, client_secret, redirect_uri, code_verifier } = req.body;
 
-  if (!code || !client_id || !redirect_uri || !code_verifier) {
+  if (!code || !client_id || !client_secret || !redirect_uri || !code_verifier) {
     return res.status(400).json({
       error: "invalid_request",
       error_description: "Missing required parameters",
     });
   }
 
-  const client = getClient(client_id);
-  if (!client) {
-    return res.status(400).json({ error: "invalid_client" });
+  // Verify client credentials
+  if (!verifyClientSecret(client_id, client_secret)) {
+    return res.status(401).json({ error: "invalid_client" });
   }
 
   const codeRow = consumeCode(code);
@@ -67,13 +67,18 @@ function handleAuthorizationCode(req, res) {
 }
 
 function handleRefreshToken(req, res) {
-  const { refresh_token, client_id } = req.body;
+  const { refresh_token, client_id, client_secret } = req.body;
 
-  if (!refresh_token || !client_id) {
+  if (!refresh_token || !client_id || !client_secret) {
     return res.status(400).json({
       error: "invalid_request",
       error_description: "Missing required parameters",
     });
+  }
+
+  // Verify client credentials
+  if (!verifyClientSecret(client_id, client_secret)) {
+    return res.status(401).json({ error: "invalid_client" });
   }
 
   const tokenRow = consumeRefreshToken(refresh_token);

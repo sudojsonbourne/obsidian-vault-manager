@@ -1,27 +1,26 @@
-import { v4 as uuidv4 } from "uuid";
-import db from "./db.js";
+import { config } from "../config.js";
 
-const insertStmt = db.prepare(
-  "INSERT INTO clients (client_id, client_name, redirect_uris) VALUES (?, ?, ?)"
-);
-
-const findStmt = db.prepare("SELECT * FROM clients WHERE client_id = ?");
-
-export function createClient(clientName, redirectUris) {
-  const clientId = uuidv4();
-  insertStmt.run(clientId, clientName, JSON.stringify(redirectUris));
-  return {
-    client_id: clientId,
-    client_name: clientName,
-    redirect_uris: redirectUris,
-  };
+/**
+ * Look up a pre-registered client by client_id.
+ * Clients are configured via environment variables, not dynamic registration.
+ */
+export function getClient(clientId) {
+  for (const vault of Object.values(config.vaults)) {
+    if (vault.clientId === clientId) {
+      return {
+        client_id: vault.clientId,
+        client_secret: vault.clientSecret,
+      };
+    }
+  }
+  return null;
 }
 
-export function getClient(clientId) {
-  const row = findStmt.get(clientId);
-  if (!row) return null;
-  return {
-    ...row,
-    redirect_uris: JSON.parse(row.redirect_uris),
-  };
+/**
+ * Verify the client_secret for a given client_id.
+ */
+export function verifyClientSecret(clientId, clientSecret) {
+  const client = getClient(clientId);
+  if (!client) return false;
+  return client.client_secret === clientSecret;
 }

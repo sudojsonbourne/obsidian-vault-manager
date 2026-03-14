@@ -1,6 +1,8 @@
 const required = [
-  "AUDREY_VAULT_PASSWORD",
-  "TAYLOR_VAULT_PASSWORD",
+  "AUDREY_CLIENT_ID",
+  "AUDREY_CLIENT_SECRET",
+  "TAYLOR_CLIENT_ID",
+  "TAYLOR_CLIENT_SECRET",
   "AUTH_SECRET",
   "AUDREY_PUBLIC_URL",
   "TAYLOR_PUBLIC_URL",
@@ -22,12 +24,14 @@ export const config = {
 
   vaults: {
     audrey: {
-      password: process.env.AUDREY_VAULT_PASSWORD,
+      clientId: process.env.AUDREY_CLIENT_ID,
+      clientSecret: process.env.AUDREY_CLIENT_SECRET,
       publicUrl: process.env.AUDREY_PUBLIC_URL,
       backend: process.env.AUDREY_BACKEND,
     },
     taylor: {
-      password: process.env.TAYLOR_VAULT_PASSWORD,
+      clientId: process.env.TAYLOR_CLIENT_ID,
+      clientSecret: process.env.TAYLOR_CLIENT_SECRET,
       publicUrl: process.env.TAYLOR_PUBLIC_URL,
       backend: process.env.TAYLOR_BACKEND,
     },
@@ -50,6 +54,16 @@ export function resolveVault(host) {
   for (const [name, vault] of Object.entries(config.vaults)) {
     const publicHost = new URL(vault.publicUrl).hostname;
     if (h === publicHost) return name;
+  }
+  return null;
+}
+
+/**
+ * Look up a vault by client_id. Returns the vault name or null.
+ */
+export function resolveVaultByClientId(clientId) {
+  for (const [name, vault] of Object.entries(config.vaults)) {
+    if (vault.clientId === clientId) return name;
   }
   return null;
 }
