@@ -50,10 +50,10 @@ services:
       retries: 3
       start_period: 120s
 
-  mcp-audrey:
+  obsidian-audrey:
     build:
       context: ./mcp-server
-    container_name: obsidian-mcp-audrey
+    container_name: obsidian-audrey
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 256m
@@ -78,10 +78,10 @@ services:
       timeout: 10s
       retries: 3
 
-  mcp-taylor:
+  obsidian-taylor:
     build:
       context: ./mcp-server
-    container_name: obsidian-mcp-taylor
+    container_name: obsidian-taylor
     restart: unless-stopped
     user: "1026:100"
     mem_limit: 256m

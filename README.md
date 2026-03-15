@@ -17,7 +17,7 @@ Claude iOS / claude.ai  (your Max Plan)
         ▼
   mcp-auth-proxy  (external — see mcp-auth-proxy repo)
         │                    │
-   mcp-audrey            mcp-taylor
+   obsidian-audrey            obsidian-taylor
    /vault (audrey)       /vault (taylor)
         │                    │
   obsidian-sync-audrey   obsidian-sync-taylor
@@ -34,8 +34,8 @@ Claude iOS / claude.ai  (your Max Plan)
 |-----------|---------|
 | `obsidian-sync-audrey` | Syncs Audrey's vault from Obsidian Cloud to NAS |
 | `obsidian-sync-taylor` | Syncs Taylor's vault from Obsidian Cloud to NAS |
-| `mcp-audrey` | MCP server scoped to Audrey's vault |
-| `mcp-taylor` | MCP server scoped to Taylor's vault |
+| `obsidian-audrey` | MCP server scoped to Audrey's vault |
+| `obsidian-taylor` | MCP server scoped to Taylor's vault |
 
 > **Auth and tunnel services** (auth-proxy, cloudflared) have been extracted to [mcp-auth-proxy](https://github.com/sudojsonbourne/mcp-auth-proxy). This repo connects to the `mcp-net` Docker network created by that stack.
 
@@ -140,8 +140,8 @@ sudo docker logs obsidian-sync-audrey --tail 20
 sudo docker logs obsidian-sync-taylor --tail 20
 
 # Test MCP health endpoints (Docker-internal only)
-sudo docker exec obsidian-mcp-audrey wget -q -O- http://localhost:3001/health
-sudo docker exec obsidian-mcp-taylor wget -q -O- http://localhost:3002/health
+sudo docker exec obsidian-obsidian-audrey wget -q -O- http://localhost:3001/health
+sudo docker exec obsidian-obsidian-taylor wget -q -O- http://localhost:3002/health
 ```
 
 > **Private repo?** If the GitHub repo is private, use a [personal access token](https://github.com/settings/tokens) in the clone URL:
@@ -186,8 +186,8 @@ All paths are relative to the vault root. Path traversal is blocked.
 
 | Port | Service | Purpose |
 |------|---------|---------|
-| 3001 | mcp-audrey | Audrey's MCP server (Docker-internal on `mcp-net`) |
-| 3002 | mcp-taylor | Taylor's MCP server (Docker-internal on `mcp-net`) |
+| 3001 | obsidian-audrey | Audrey's MCP server (Docker-internal on `mcp-net`) |
+| 3002 | obsidian-taylor | Taylor's MCP server (Docker-internal on `mcp-net`) |
 
 > Port 3000 (auth-proxy) is managed by [mcp-auth-proxy](https://github.com/sudojsonbourne/mcp-auth-proxy).
 
@@ -265,7 +265,7 @@ sudo docker logs obsidian-sync-audrey --tail 30
 The MCP containers depend on sync containers being started (`depends_on: condition: service_started`) — they don't wait for sync to be fully healthy, just for the container to launch. If the MCP server itself fails to start, check its logs:
 
 ```bash
-sudo docker logs obsidian-mcp-audrey --tail 20
+sudo docker logs obsidian-obsidian-audrey --tail 20
 ```
 
 Common causes:
@@ -287,17 +287,17 @@ All containers run as `user: "1026:100"` (set in `docker-compose.yml`) to match 
 sudo chown -R 1026:100 /volume1/obsidian
 sudo chmod 775 /volume1/obsidian
 sudo chmod -R 770 /volume1/obsidian/audrey-vault /volume1/obsidian/taylor-vault
-sudo docker compose restart mcp-audrey mcp-taylor
+sudo docker compose restart obsidian-audrey obsidian-taylor
 ```
 
 **Verify from inside the container:**
 ```bash
 # Confirm the process runs as 1026
-sudo docker exec obsidian-mcp-audrey id
+sudo docker exec obsidian-obsidian-audrey id
 # Expected: uid=1026 gid=100(users)
 
 # Confirm the vault is readable
-sudo docker exec obsidian-mcp-audrey ls -la /vault/
+sudo docker exec obsidian-obsidian-audrey ls -la /vault/
 ```
 
 > **Synology ACL note:** Synology DSM uses POSIX ACLs that can override standard Unix permissions. If `chown`/`chmod` alone doesn't fix it, the ACLs may be blocking access. Running `chmod` on Synology typically resets the ACLs to match, but if issues persist, check ACLs via DSM → Control Panel → Shared Folder → Permissions.
