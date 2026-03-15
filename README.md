@@ -49,7 +49,7 @@ Claude iOS / claude.ai  (your Max Plan)
 The vault data is protected by several layers:
 
 - **Cloudflare Tunnel** — the MCP servers are not exposed to the public internet. Traffic routes through an encrypted Cloudflare Tunnel, which terminates TLS at the Cloudflare edge. No ports are opened on your router or firewall.
-- **Cloudflare WAF hardening** — WAF custom rules and rate limiting provide defense-in-depth at the Cloudflare edge, blocking malformed or excessive requests before they reach your NAS. See [Cloudflare Hardening](#cloudflare-hardening).
+- **Cloudflare WAF hardening** — WAF custom rules and rate limiting provide defense-in-depth at the Cloudflare edge, blocking malformed or excessive requests before they reach your NAS. See the [cloudflared-tunnel README](https://github.com/sudojsonbourne/cloudflared-tunnel#cloudflare-hardening).
 - **OAuth 2.1 authentication** — the auth-proxy sidecar implements an OAuth 2.1 authorization server with PKCE (S256) and pre-registered confidential clients. Each vault has its own `client_id` and `client_secret`, configured in the Claude.ai connector. The authorization flow is fully automatic (no interactive login page). Access tokens are vault-scoped — a token issued for one vault cannot access the other. Tokens expire after 1 hour, with 90-day rotating refresh tokens.
 - **Localhost-only ports** — MCP ports (3001, 3002) are internal to the Docker network. The auth-proxy port (3000) is bound to `127.0.0.1` on the NAS. They are not reachable from other devices on the LAN.
 - **Vault isolation** — each MCP container mounts only its own vault directory. Even if the path validation in `server.js` had a bug, one vault's MCP server cannot access the other vault's files.
@@ -157,55 +157,7 @@ Alternatively, delete the old CNAME records and re-add the public hostnames in t
 
 ### Cloudflare Hardening
 
-The MCP endpoints are authenticated at the application level via OAuth 2.1 (see [Security Model](#security-model)). The following Cloudflare WAF rules provide defense-in-depth — blocking malformed or excessive requests at the edge before they reach your NAS.
-
-#### WAF Custom Rules (free tier — up to 5 rules)
-
-Go to **Cloudflare dashboard → Security → WAF → Custom rules** for your domain.
-
-**Rule 1: Block non-POST methods on MCP paths**
-
-The MCP endpoint only accepts POST requests. Block everything else at the edge rather than letting it through to Express.
-
-| Field | Value |
-|-------|-------|
-| Rule name | MCP POST only |
-| Expression | `(http.host in {"audrey-vault.yourdomain.com" "taylor-vault.yourdomain.com"} and http.request.uri.path eq "/mcp" and http.request.method ne "POST")` |
-| Action | Block |
-
-**Rule 2: Geo-restrict to expected regions (optional)**
-
-If you know Anthropic routes MCP traffic from the US, restrict to that region. Monitor Cloudflare analytics first to confirm — Anthropic may use global infrastructure.
-
-| Field | Value |
-|-------|-------|
-| Rule name | MCP geo-restrict |
-| Expression | `(http.host in {"audrey-vault.yourdomain.com" "taylor-vault.yourdomain.com"} and not ip.geoip.country in {"US"})` |
-| Action | Block |
-
-> **Tip:** Start with this rule in **Log** mode (action: Log) to observe traffic origins before switching to Block.
-
-#### WAF Rate Limiting (free tier — 1 rule)
-
-Go to **Cloudflare dashboard → Security → WAF → Rate limiting rules**.
-
-| Field | Value |
-|-------|-------|
-| Rule name | MCP rate limit |
-| Expression | `(http.host in {"audrey-vault.yourdomain.com" "taylor-vault.yourdomain.com"} and http.request.uri.path eq "/mcp")` |
-| Rate | 60 requests per minute |
-| Counting | Per IP (free tier) |
-| Mitigation | Block for 10 minutes |
-
-Normal Claude usage won't approach 60 requests per minute. This protects against brute-force attempts or abuse if someone discovers the endpoint.
-
-> **Note:** The OAuth endpoints (`/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`) are not covered by the MCP rate-limiting rule since they use different paths. The `/authorize` endpoint is protected against brute-force password guessing by the per-IP rate limit — each failed attempt still counts against the 60 req/min limit for the hostname.
-
-#### Monitoring
-
-- **Traffic analytics:** Cloudflare dashboard → Analytics & Logs → Traffic. Free tier includes per-hostname request analytics — monitor for unusual patterns on MCP hostnames.
-- **WAF events:** Security → Events shows blocked requests from your custom rules and rate limiting. Check periodically to verify rules are working and tune thresholds.
-- **Paid tiers (Pro+):** Add detailed request logs, alerting, and additional WAF rules.
+WAF custom rules, rate limiting, and geo-blocking are configured at the Cloudflare edge and apply to all tunneled services. See the [cloudflared-tunnel README](https://github.com/sudojsonbourne/cloudflared-tunnel#cloudflare-hardening) for setup instructions.
 
 ## 4. Deploy
 
