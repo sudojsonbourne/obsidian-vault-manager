@@ -106,49 +106,7 @@ services:
       timeout: 10s
       retries: 3
 
-  auth-proxy:
-    build:
-      context: ./auth-proxy
-    container_name: obsidian-auth-proxy
-    restart: unless-stopped
-    user: "1026:100"
-    mem_limit: 128m
-    read_only: true
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    volumes:
-      - /volume1/obsidian/auth-data:/data
-    ports:
-      - "127.0.0.1:3000:3000"
-    environment:
-      - PORT=3000
-      - AUDREY_CLIENT_ID=${AUDREY_CLIENT_ID}
-      - AUDREY_CLIENT_SECRET=${AUDREY_CLIENT_SECRET}
-      - TAYLOR_CLIENT_ID=${TAYLOR_CLIENT_ID}
-      - TAYLOR_CLIENT_SECRET=${TAYLOR_CLIENT_SECRET}
-      - AUTH_SECRET=${AUTH_SECRET}
-      - AUDREY_PUBLIC_URL=${AUDREY_PUBLIC_URL}
-      - TAYLOR_PUBLIC_URL=${TAYLOR_PUBLIC_URL}
-      - AUDREY_BACKEND=http://mcp-audrey:3001
-      - TAYLOR_BACKEND=http://mcp-taylor:3002
-    depends_on:
-      mcp-audrey:
-        condition: service_healthy
-      mcp-taylor:
-        condition: service_healthy
-    networks:
-      - default
-      - tunnel-net
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 networks:
-  tunnel-net:
+  default:
+    name: mcp-net
     external: true
